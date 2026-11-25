@@ -11,20 +11,24 @@
 
 ## 效果预览
 
-### 1. 通知推送与统一消息中心
+### 1. 通知栏直接审批与统一消息中心
 
 <table>
   <tr>
-    <td align="center" width="33%">
-      <img src="docs/screenshots/01-notification.webp" alt="通知栏推送" width="230" /><br />
-      <sub>通知栏实时推送与一键进终端</sub>
+    <td align="center" width="25%">
+      <img src="docs/screenshots/00-approval-notification.webp" alt="通知栏直接审批" width="190" /><br />
+      <sub>通知栏直接点「允许 / 拒绝 / 退回电脑」</sub>
     </td>
-    <td align="center" width="33%">
-      <img src="docs/screenshots/02-messages.webp" alt="消息列表" width="230" /><br />
+    <td align="center" width="25%">
+      <img src="docs/screenshots/01-notification.webp" alt="通知栏任务完成推送" width="190" /><br />
+      <sub>任务完成推送与一键进入终端</sub>
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/screenshots/02-messages.webp" alt="消息列表" width="190" /><br />
       <sub>多 AI 统一消息流与绿点直达终端</sub>
     </td>
-    <td align="center" width="33%">
-      <img src="docs/screenshots/03-message-detail.webp" alt="消息详情" width="230" /><br />
+    <td align="center" width="25%">
+      <img src="docs/screenshots/03-message-detail.webp" alt="消息详情" width="190" /><br />
       <sub>任务完成与异常详情弹窗</sub>
     </td>
   </tr>
