@@ -1,11 +1,42 @@
 # Phone AI Audit
 
+<p align="center">
+  <img src="docs/assets/vibe-hero.webp" alt="Phone AI Audit — Vibe Coding Anywhere" width="840" /><br />
+  <sub>躺平吹海风喝椰子水，手机一点「ALLOW ✓」，远端 AI 小弟团继续在 Mac 上疯狂输出代码</sub>
+</p>
+
 一套面向个人开发工作流的移动端 AI 通知、远程审批、实时交互终端与远程文件 / Git 工作台系统：
 
 - **统一接管多 AI 助手**：支持 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)** 的任务完成 / 异常 / 等待回答 / 权限审批消息；
 - **多模式远程审批**：支持手机通知栏直接点 **允许 / 拒绝（内联输入理由）/ 退回电脑**，并提供 **双端同步 (`both`)** 模式（Mac 屏幕右上角原生悬浮窗与手机通知栏同时弹出，先点为准、另一端自动消失），高危操作支持生物识别二次确认；
 - **加密反向隧道实时终端**：内置 `xterm.js` + `tmux` 联动终端，无需暴露 Mac SSH 22 端口，支持随时接入正在运行的 AI 终端或在手机端一键新建 Mac 终端（电脑端自动同步弹出窗口），配可拖动悬浮方向键 / 快捷键手柄与独立中文提示词输入框；
 - **远程免下载文件浏览 & Git 工作台**：按需流式传输、不落盘，支持文件名与 `rg` 全文搜索、代码语法高亮预览、在线编辑（保存前 Diff + SHA256 乐观锁防覆盖）、Markdown / 图片 / PDF / Excel / Word / PPT / 音视频预览，以及 Git Diff / 批量精准 Commit / 安全 Push。
+
+---
+
+## 随时随地 Vibe Coding
+
+> 电脑交给 AI 疯狂写代码，审批、看 Diff、Commit & Push 交给手机——人在哪儿，工位就在哪儿。
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/assets/vibe-toilet.webp" alt="带薪蹲坑远程审批" width="260" /><br />
+      <strong>带薪蹲坑审批</strong><br />
+      <sub>手机一点「ALLOW ✓」，工位 AI 继续疯狂敲代码，灵感和进度两不误</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/assets/vibe-commute.webp" alt="早高峰地铁单手 Vibe Coding" width="260" /><br />
+      <strong>早高峰地铁发版</strong><br />
+      <sub>全车厢都在补觉，只有你戴着耳机单手扶吊环，优雅点下「APPROVE ✓」</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/assets/vibe-couch.webp" alt="被窝撸猫顺手 Push" width="260" /><br />
+      <strong>被窝撸猫顺手 Push</strong><br />
+      <sub>裹紧毯子喝口奶茶，里屋 AI 刚飙出 <code>+999 -12</code>，手机一键「PUSH ↑」</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -122,7 +153,9 @@
 ```text
 phone_ai_audit/
 ├── config.env.example                  # 统一构建与部署配置模板（复制为 config.env 后使用，已 gitignore）
-├── docs/screenshots/                   # README 展示用脱敏 WebP 截图
+├── docs/
+│   ├── assets/                         # README 展示用 Vibe Coding 主题插画 (WebP)
+│   └── screenshots/                    # README 展示用脱敏 WebP 截图与动态演示
 ├── relay/                              # Linux Go 中转服务 (ai-audit-relay, SQLite WAL, 低内存占用)
 │   └── .env.example                    # Relay 运行时环境变量模板
 ├── mac-agent/                          # Mac 守护进程 (ai-audit-agent) + Hook 适配器 + 悬浮审批窗 + 控制 CLI
