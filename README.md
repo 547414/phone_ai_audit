@@ -146,7 +146,19 @@
   </tr>
 </table>
 
-### 5. 终极中控台：审批模式 · 一键熔断 · 指纹锁全掌控
+### 5. 双端 Agent 用量与实时配额看板：Mac 网页 × 手机 App 同步掌握
+
+<p align="center">
+  <img src="docs/screenshots/16-usage-web.webp" alt="Mac 本机 iOS 风格 Agent 用量看板" width="740" /><br />
+  <sub>Mac 本机 iOS 风格用量看板（<code>http://127.0.0.1:9878</code>，支持明暗切换）：一次汇总 Claude Code、OpenAI Codex（含 <code>.jsonl.zst</code> 归档）与 Antigravity 全量 Token、官方配额进度、重置倒计时与分模型明细</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/15-usage-mobile.webp" alt="手机 App 用量与配额全景" width="280" /><br />
+  <sub>手机 App「用量」Tab 随时随地查账：近 5 小时 / 今日 / 本周 / 本月 / 历史总量、Codex &amp; Antigravity 官方实时配额倒计时与近 14 天趋势柱图一览无余</sub>
+</p>
+
+### 6. 终极中控台：审批模式 · 一键熔断 · 指纹锁全掌控
 
 <p align="center">
   <img src="docs/screenshots/11-control-panel.webp" alt="控制中心设置" width="260" /><br />
