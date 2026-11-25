@@ -41,6 +41,11 @@
   </tr>
 </table>
 
+<p align="center">
+  <img src="docs/screenshots/00b-mac-approval-popup.webp" alt="Mac 原生悬浮审批窗" width="540" /><br />
+  <sub>双端同步模式下的 Mac 屏幕右上角原生悬浮审批卡片（支持高危红框、倒计时、拒绝理由与一键退回终端）</sub>
+</p>
+
 ### 2. 实时交互终端与 Mac 端同步弹窗
 
 <table>
@@ -84,7 +89,26 @@
   </tr>
 </table>
 
-### 4. 控制中心、审批模式与安全开关
+### 4. 移动端 Git 工作台（状态探测 · Diff · 批量 Commit / Push）
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/12-git-repo-banner.webp" alt="Git 仓库状态条" width="230" /><br />
+      <sub>自动识别 Git 仓库与未提交改动微标</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/13-git-workbench.webp" alt="Git 批量提交工作台" width="230" /><br />
+      <sub>精准勾选批量 Commit 与安全 Push</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/14-git-diff.webp" alt="Git Diff 查看器" width="230" /><br />
+      <sub>工作区 / 暂存区红绿高亮 Diff 阅读</sub>
+    </td>
+  </tr>
+</table>
+
+### 5. 控制中心、审批模式与安全开关
 
 <p align="center">
   <img src="docs/screenshots/11-control-panel.webp" alt="控制中心设置" width="260" /><br />
