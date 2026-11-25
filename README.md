@@ -11,6 +11,13 @@
 
 ## 效果预览
 
+### 实机动态演示：双端同步审批（Mac 浮窗 + 手机通知栏实时联动）
+
+<p align="center">
+  <img src="docs/screenshots/demo-dual-approval.webp" alt="双端同步审批动态演示" width="840" /><br />
+  <sub>AI 触发高危操作时，Mac 屏幕右上角原生悬浮窗与手机通知栏同时弹出；手机一键点击「允许」后，Mac 悬浮窗立即自动消失并继续执行任务</sub>
+</p>
+
 ### 1. 通知栏直接审批与统一消息中心
 
 <table>
