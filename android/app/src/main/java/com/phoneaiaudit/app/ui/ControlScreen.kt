@@ -172,13 +172,19 @@ fun ControlScreen(
             item {
                 val modeFooter = when (status.settings.approvalMode) {
                     "auto" -> "人在电脑前直接走本地弹窗；离座超过 ${status.settings.idleThresholdSec} 秒或锁屏自动转手机审批。"
+                    "both" -> "电脑屏幕右上角浮窗与手机通知栏同时弹出审批，哪边先点以哪边为准，另一端自动消失。"
                     "phone" -> "所有权限请求统一优先发送至手机审批。"
                     else -> "不阻塞终端，仅接收任务完成/出错/提醒通知。"
                 }
                 IosSection(title = "审批模式", footer = modeFooter) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         IosSegmentedControl(
-                            options = listOf("auto" to "智能离座", "phone" to "始终手机", "notify" to "仅通知"),
+                            options = listOf(
+                                "auto" to "智能离座",
+                                "both" to "双端同步",
+                                "phone" to "始终手机",
+                                "notify" to "仅通知"
+                            ),
                             selectedKey = status.settings.approvalMode,
                             onSelect = { patchRemote("approval_mode", it) }
                         )

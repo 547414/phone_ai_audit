@@ -78,10 +78,11 @@ mkdir -p dist
 前置条件：已安装 Go 1.24+、Homebrew、`tmux`（可选 `ripgrep`、`poppler`、`ffmpeg` 以启用全文搜索、PDF 渲染和媒体预览）。
 
 ```bash
-# 编译 Mac 端三个组件
+# 编译 Mac 端组件（含原生双端悬浮审批弹窗）
 (cd mac-agent && go build -o ../dist/ai-audit-agent ./cmd/ai-audit-agent)
 (cd mac-agent && go build -o ../dist/ai-audit-hook ./cmd/ai-audit-hook)
 (cd mac-agent && go build -o ../dist/ai-audit ./cmd/ai-audit)
+swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 
 # 若未通过 deploy-relay.sh 自动生成配置，请手动创建 ~/.config/ai-audit/config.json
 # cp mac-agent/config.example.json ~/.config/ai-audit/config.json
@@ -112,9 +113,11 @@ ai-audit status
 
 # 切换审批模式：
 #   auto   = 智能离座（电脑前直接走本地弹窗，离座 60s 或锁屏自动转手机）
+#   both   = 双端同步（电脑屏幕右上角悬浮窗与手机通知栏同时弹出审批，哪边先点以哪边为准，另一端自动消失）
 #   phone  = 始终走手机审批
 #   notify = 仅收消息不阻塞
 ai-audit mode auto
+ai-audit mode both
 ai-audit mode phone
 ai-audit mode notify
 

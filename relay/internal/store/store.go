@@ -166,7 +166,7 @@ func (s *Store) SaveSettings(ctx context.Context, cfg model.Settings) (model.Set
 
 func normalizeSettings(cfg *model.Settings) {
 	switch cfg.ApprovalMode {
-	case model.ModeAuto, model.ModePhone, model.ModeNotify:
+	case model.ModeAuto, model.ModeBoth, model.ModePhone, model.ModeNotify:
 	default:
 		cfg.ApprovalMode = model.ModeAuto
 	}

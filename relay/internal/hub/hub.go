@@ -505,6 +505,10 @@ func (h *Hub) onApprovalResolved(ctx context.Context, a model.Approval) {
 		model.StatusExpired:  "超时自动拒绝",
 		model.StatusCanceled: "Mac 端已取消",
 	}[a.Status]
+	sourceTag := ""
+	if a.DecidedBy == "mac_local" {
+		sourceTag = "（电脑端）"
+	}
 	body := a.Summary
 	if a.DecisionReason != "" {
 		body = fmt.Sprintf("%s\n备注：%s", body, a.DecisionReason)
@@ -513,7 +517,7 @@ func (h *Hub) onApprovalResolved(ctx context.Context, a model.Approval) {
 		Agent:       a.Agent,
 		EventType:   "approval_result",
 		Priority:    "default",
-		Title:       fmt.Sprintf("%s 审批%s", agentLabel(a.Agent), statusLabel),
+		Title:       fmt.Sprintf("%s 审批%s%s", agentLabel(a.Agent), statusLabel, sourceTag),
 		Body:        body,
 		TaskTitle:   a.TaskTitle,
 		ProjectName: a.ProjectName,
@@ -1003,6 +1007,7 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 		Approval      *model.Approval     `json:"approval"`
 		TimeoutSec    int                 `json:"timeout_sec"`
 		ApprovalID    string              `json:"approval_id"`
+		Decision      string              `json:"decision"`
 		Message       *model.Message      `json:"message"`
 		StreamID      string              `json:"stream_id"`
 		Cols          int                 `json:"cols"`
@@ -1064,6 +1069,10 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 				"type":     "approval.decision",
 				"approval": created,
 			})
+		}
+	case "approval.decide":
+		if env.ApprovalID != "" && env.Decision != "" {
+			_, _ = h.DecideApproval(ctx, env.ApprovalID, env.Decision, env.Reason, "once", "mac_local")
 		}
 	case "approval.cancel":
 		if env.ApprovalID != "" {

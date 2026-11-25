@@ -3,6 +3,7 @@
 # Reads settings from ./config.env (copy from config.env.example).
 # Preserves existing tokens if already configured in MAC_CONFIG_PATH.
 set -eu
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

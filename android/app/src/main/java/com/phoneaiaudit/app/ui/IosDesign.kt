@@ -326,7 +326,7 @@ fun IosSegmentedControl(
                 Text(
                     text = label,
                     color = if (selected) p.label else p.secondaryLabel,
-                    fontSize = 13.sp,
+                    fontSize = if (options.size >= 4) 12.sp else 13.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

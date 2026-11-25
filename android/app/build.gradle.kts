@@ -57,8 +57,8 @@ android {
         applicationId = configuredAppId
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "2.1.3"
+        versionCode = 12
+        versionName = "2.2.0"
 
         buildConfigField(
             "String",

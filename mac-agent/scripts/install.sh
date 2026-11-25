@@ -27,6 +27,14 @@ echo "==> 1. 安装二进制与 ai-tmux 包装脚本到 $BIN_DIR"
 install -m 755 "$ROOT_DIR/dist/ai-audit-agent" "$BIN_DIR/ai-audit-agent"
 install -m 755 "$ROOT_DIR/dist/ai-audit-hook" "$BIN_DIR/ai-audit-hook"
 install -m 755 "$ROOT_DIR/dist/ai-audit" "$BIN_DIR/ai-audit"
+if [[ ! -x "$ROOT_DIR/dist/ai-audit-prompt" && -f "$ROOT_DIR/mac-agent/prompt/main.swift" ]] && command -v swiftc >/dev/null 2>&1; then
+  echo "    编译 Mac 原生悬浮审批程序 ai-audit-prompt..."
+  mkdir -p "$ROOT_DIR/dist"
+  swiftc -O "$ROOT_DIR/mac-agent/prompt/main.swift" -o "$ROOT_DIR/dist/ai-audit-prompt"
+fi
+if [[ -x "$ROOT_DIR/dist/ai-audit-prompt" ]]; then
+  install -m 755 "$ROOT_DIR/dist/ai-audit-prompt" "$BIN_DIR/ai-audit-prompt"
+fi
 install -m 755 "$SCRIPT_DIR/ai-tmux" "$BIN_DIR/ai-tmux"
 
 echo "==> 2. 备份现有配置到 $BACKUP_DIR"

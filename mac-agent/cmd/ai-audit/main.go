@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 
 	"phone-ai-audit/mac-agent/internal/config"
 	"phone-ai-audit/mac-agent/internal/idle"
+	"phone-ai-audit/mac-agent/internal/proto"
 	"phone-ai-audit/mac-agent/internal/term"
 )
 
@@ -34,7 +37,7 @@ func main() {
 		cmdStatus(cfg)
 	case "mode":
 		if len(os.Args) < 3 {
-			fmt.Println("用法: ai-audit mode auto|phone|notify")
+			fmt.Println("用法: ai-audit mode auto|both|phone|notify")
 			os.Exit(1)
 		}
 		patchSettings(cfg, map[string]any{"approval_mode": os.Args[2]})
@@ -69,14 +72,14 @@ func main() {
 
 func usage() {
 	fmt.Println(`Phone AI Audit Mac 控制命令:
-  ai-audit status                    查看中转状态、手机在线数、当前模式、tmux 会话
-  ai-audit mode auto|phone|notify    切换审批模式 (智能离座 / 始终手机 / 仅通知)
-  ai-audit awake on|off              开启/关闭 Mac 防休眠 (caffeinate)
-  ai-audit terminal on|off           开启/关闭远程交互终端总开关
-  ai-audit files on|off              开启/关闭远程文件查看/编辑与 Git 操作总开关
-  ai-audit pair                      打印 Android App 扫码配对二维码与配置信息
-  ai-audit test-msg                  发送一条测试消息到手机
-  ai-audit test-approve              发起一次测试远程审批并等待手机决策`)
+  ai-audit status                         查看中转状态、手机在线数、当前模式、tmux 会话
+  ai-audit mode auto|both|phone|notify    切换审批模式 (智能离座 / 双端同步 / 始终手机 / 仅通知)
+  ai-audit awake on|off                   开启/关闭 Mac 防休眠 (caffeinate)
+  ai-audit terminal on|off                开启/关闭远程交互终端总开关
+  ai-audit files on|off                   开启/关闭远程文件查看/编辑与 Git 操作总开关
+  ai-audit pair                           打印 Android App 扫码配对二维码与配置信息
+  ai-audit test-msg                       发送一条测试消息到手机
+  ai-audit test-approve                   发起一次测试远程审批并等待决策`)
 }
 
 func client() *http.Client {
@@ -176,17 +179,54 @@ func cmdTestMessage(cfg config.Config) {
 
 func cmdTestApproval(cfg config.Config) {
 	cwd, _ := os.Getwd()
+	approval := proto.Approval{
+		Agent:       "claude",
+		TmuxSession: term.CurrentTmuxSession(),
+		TaskTitle:   "远程审批联通测试",
+		ProjectName: filepath.Base(cwd),
+		Cwd:         cwd,
+		ToolName:    "Bash",
+		Summary:     "[Bash] echo 'hello from phone approval'",
+		PayloadJSON: `{"command": "echo 'hello from phone approval'"}`,
+		RiskLevel:   "medium",
+		RiskReasons: []string{"测试审批请求"},
+	}
+
+	// Prefer routing through the local daemon so `both` (dual-end) and `auto` modes behave identically to real hooks.
+	unixCli := &http.Client{
+		Timeout: 105 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "unix", cfg.SocketPath)
+			},
+		},
+	}
+	reqBody, _ := json.Marshal(proto.HookApprovalReq{Approval: approval, TimeoutSec: 90})
+	if ureq, err := http.NewRequest(http.MethodPost, "http://unix/local/approval", bytes.NewReader(reqBody)); err == nil {
+		ureq.Header.Set("Content-Type", "application/json")
+		fmt.Println("已通过本机守护进程发起测试审批，等待决策中 (最长 90 秒)...")
+		if uresp, err := unixCli.Do(ureq); err == nil {
+			defer uresp.Body.Close()
+			resBytes, _ := io.ReadAll(uresp.Body)
+			if uresp.StatusCode < 300 {
+				fmt.Println("收到审批结果:", strings.TrimSpace(string(resBytes)))
+				return
+			}
+		}
+	}
+
+	// Fallback to direct relay call if daemon is offline.
 	data, code, err := relayReq(cfg, http.MethodPost, "/api/v1/approvals", map[string]any{
-		"agent":        "claude",
-		"tmux_session": term.CurrentTmuxSession(),
-		"task_title":   "手机端远程审批联通测试",
-		"project_name": filepath.Base(cwd),
-		"cwd":          cwd,
-		"tool_name":    "Bash",
-		"summary":      "[Bash] echo 'hello from phone approval'",
-		"payload_json": `{"command": "echo 'hello from phone approval'"}`,
-		"risk_level":   "medium",
-		"risk_reasons": []string{"测试审批请求"},
+		"agent":        approval.Agent,
+		"tmux_session": approval.TmuxSession,
+		"task_title":   approval.TaskTitle,
+		"project_name": approval.ProjectName,
+		"cwd":          approval.Cwd,
+		"tool_name":    approval.ToolName,
+		"summary":      approval.Summary,
+		"payload_json": approval.PayloadJSON,
+		"risk_level":   approval.RiskLevel,
+		"risk_reasons": approval.RiskReasons,
 		"timeout_sec":  90,
 	})
 	if err != nil || code >= 300 {

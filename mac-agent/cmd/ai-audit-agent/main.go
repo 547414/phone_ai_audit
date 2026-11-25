@@ -24,6 +24,7 @@ import (
 	"phone-ai-audit/mac-agent/internal/fsengine"
 	"phone-ai-audit/mac-agent/internal/gitengine"
 	"phone-ai-audit/mac-agent/internal/idle"
+	"phone-ai-audit/mac-agent/internal/prompt"
 	"phone-ai-audit/mac-agent/internal/proto"
 	"phone-ai-audit/mac-agent/internal/term"
 )
@@ -883,7 +884,8 @@ func (d *Daemon) serveLocalIPC(ctx context.Context) error {
 			}
 		}
 
-		res, err := d.requestRemoteApproval(r.Context(), req.Approval, req.TimeoutSec)
+		allowMacPrompt := st.ApprovalMode == "both"
+		res, err := d.requestRemoteApproval(r.Context(), req.Approval, req.TimeoutSec, allowMacPrompt)
 		if err != nil {
 			writeLocalJSON(w, proto.Approval{Status: "fallback", DecisionReason: err.Error()})
 			return
@@ -920,7 +922,7 @@ func (d *Daemon) forwardAttentionFallback(a proto.Approval, note string) {
 	})
 }
 
-func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, timeoutSec int) (proto.Approval, error) {
+func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, timeoutSec int, allowMacPrompt bool) (proto.Approval, error) {
 	st := d.getSettings()
 	if timeoutSec <= 0 {
 		timeoutSec = st.DefaultTimeoutSec
@@ -977,20 +979,58 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 		d.mu.Unlock()
 	}()
 
+	type promptOutcome struct {
+		res prompt.Result
+		err error
+	}
+	var macPromptCh chan promptOutcome
+	cancelPrompt := func() {}
+	if allowMacPrompt && !idle.Detect().Locked {
+		var pCtx context.Context
+		pCtx, cancelPrompt = context.WithCancel(ctx)
+		macPromptCh = make(chan promptOutcome, 1)
+		go func() {
+			r, err := prompt.Show(pCtx, a, timeoutSec)
+			macPromptCh <- promptOutcome{res: r, err: err}
+		}()
+	}
+	defer cancelPrompt()
+
 	timer := time.NewTimer(time.Duration(timeoutSec+5) * time.Second)
 	defer timer.Stop()
 
-	select {
-	case dec := <-decCh:
-		return dec, nil
-	case <-ctx.Done():
-		d.sendJSON(map[string]any{
-			"type":        "approval.cancel",
-			"approval_id": created.ID,
-		})
-		return proto.Approval{ID: created.ID, Status: "canceled"}, ctx.Err()
-	case <-timer.C:
-		return proto.Approval{ID: created.ID, Status: "fallback", DecisionReason: "本地等待超时"}, nil
+	for {
+		select {
+		case dec := <-decCh:
+			cancelPrompt()
+			return dec, nil
+		case macRes := <-macPromptCh:
+			if macRes.err != nil {
+				macPromptCh = nil
+				continue
+			}
+			d.sendJSON(map[string]any{
+				"type":        "approval.decide",
+				"approval_id": created.ID,
+				"decision":    macRes.res.Decision,
+				"reason":      macRes.res.Reason,
+			})
+			return proto.Approval{
+				ID:             created.ID,
+				Status:         macRes.res.Decision,
+				DecisionReason: macRes.res.Reason,
+			}, nil
+		case <-ctx.Done():
+			cancelPrompt()
+			d.sendJSON(map[string]any{
+				"type":        "approval.cancel",
+				"approval_id": created.ID,
+			})
+			return proto.Approval{ID: created.ID, Status: "canceled"}, ctx.Err()
+		case <-timer.C:
+			cancelPrompt()
+			return proto.Approval{ID: created.ID, Status: "fallback", DecisionReason: "本地等待超时"}, nil
+		}
 	}
 }
 

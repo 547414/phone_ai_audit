@@ -11,6 +11,7 @@ const (
 
 const (
 	ModeAuto   = "auto"
+	ModeBoth   = "both"
 	ModePhone  = "phone"
 	ModeNotify = "notify"
 )
