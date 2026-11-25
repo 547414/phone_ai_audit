@@ -9,9 +9,10 @@ deploy/ai-audit-relay.service
 *.local.env
 *.local.json
 
-# Private design notes & compiled release artifacts
+# Private design notes, raw unmasked screenshots & compiled release artifacts
 ANALYSIS.md
 FILE_AND_GIT_ANALYSIS.md
+image/
 dist/
 
 # Runtime data, backups & logs

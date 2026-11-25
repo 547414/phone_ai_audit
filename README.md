@@ -1,11 +1,84 @@
 # Phone AI Audit
 
-一套面向个人开发工作流的移动端 AI 通知、远程审批、实时交互终端与远程文件/Git 工作台系统：
+一套面向个人开发工作流的移动端 AI 通知、远程审批、实时交互终端与远程文件 / Git 工作台系统：
 
-- 统一接管 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)** 的任务完成 / 异常 / 权限审批消息；
-- 支持手机通知栏直接点 **允许 / 拒绝（内联输入理由）/ 退回电脑**，高危操作可强制进 App + 生物识别二次确认；
-- 内置加密反向隧道 **实时交互终端（`xterm.js` + `tmux` 联动）**，无需暴露 Mac SSH 22 端口，可随时查看并接管电脑上正在运行的 AI 终端或新建 Shell；
-- 内置 **远程只读/编辑文件浏览与 Git 工作台**（按需流式传输、不落盘，支持代码高亮、Markdown、图片、PDF、Excel、Word、PPT、音视频与 Git Diff / 批量 Commit / 安全 Push）。
+- **统一接管多 AI 助手**：支持 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)** 的任务完成 / 异常 / 等待回答 / 权限审批消息；
+- **多模式远程审批**：支持手机通知栏直接点 **允许 / 拒绝（内联输入理由）/ 退回电脑**，并提供 **双端同步 (`both`)** 模式（Mac 屏幕右上角原生悬浮窗与手机通知栏同时弹出，先点为准、另一端自动消失），高危操作支持生物识别二次确认；
+- **加密反向隧道实时终端**：内置 `xterm.js` + `tmux` 联动终端，无需暴露 Mac SSH 22 端口，支持随时接入正在运行的 AI 终端或在手机端一键新建 Mac 终端（电脑端自动同步弹出窗口），配可拖动悬浮方向键 / 快捷键手柄与独立中文提示词输入框；
+- **远程免下载文件浏览 & Git 工作台**：按需流式传输、不落盘，支持文件名与 `rg` 全文搜索、代码语法高亮预览、在线编辑（保存前 Diff + SHA256 乐观锁防覆盖）、Markdown / 图片 / PDF / Excel / Word / PPT / 音视频预览，以及 Git Diff / 批量精准 Commit / 安全 Push。
+
+---
+
+## 效果预览
+
+### 1. 通知推送与统一消息中心
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/01-notification.webp" alt="通知栏推送" width="230" /><br />
+      <sub>通知栏实时推送与一键进终端</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/02-messages.webp" alt="消息列表" width="230" /><br />
+      <sub>多 AI 统一消息流与绿点直达终端</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/03-message-detail.webp" alt="消息详情" width="230" /><br />
+      <sub>任务完成与异常详情弹窗</sub>
+    </td>
+  </tr>
+</table>
+
+### 2. 实时交互终端与 Mac 端同步弹窗
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/04-terminal-sessions.webp" alt="终端会话列表" width="230" /><br />
+      <sub>活跃 tmux 会话池与一键新建终端</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/05-terminal-live.webp" alt="实时终端" width="230" /><br />
+      <sub>xterm.js 实时终端与中文提示词输入条</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/06-terminal-gamepad.webp" alt="悬浮方向键与快捷键" width="230" /><br />
+      <sub>可拖动悬浮方向键与常用快捷键手柄</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/07-mac-terminal-sync.webp" alt="Mac 端同步弹窗终端" width="760" /><br />
+  <sub>手机新建终端时，Mac 端自动同步弹出 Terminal 窗口并共享同一 tmux 会话</sub>
+</p>
+
+### 3. 远程免下载文件浏览、代码高亮与在线编辑
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/08-files-browser.webp" alt="文件浏览器" width="230" /><br />
+      <sub>沙箱目录浏览与文件名 / rg 内容检索</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/09-code-viewer.webp" alt="代码高亮预览" width="230" /><br />
+      <sub>离线代码语法高亮与行号阅读器</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/10-code-editor.webp" alt="代码在线编辑" width="230" /><br />
+      <sub>远程在线编辑（保存前 Diff 与乐观锁）</sub>
+    </td>
+  </tr>
+</table>
+
+### 4. 控制中心、审批模式与安全开关
+
+<p align="center">
+  <img src="docs/screenshots/11-control-panel.webp" alt="控制中心设置" width="260" /><br />
+  <sub>通道状态、主题切换、审批模式、远程能力熔断、指纹门禁、扫码配对与后台保活体检</sub>
+</p>
 
 ---
 
@@ -14,10 +87,12 @@
 ```text
 phone_ai_audit/
 ├── config.env.example                  # 统一构建与部署配置模板（复制为 config.env 后使用，已 gitignore）
+├── docs/screenshots/                   # README 展示用脱敏 WebP 截图
 ├── relay/                              # Linux Go 中转服务 (ai-audit-relay, SQLite WAL, 低内存占用)
 │   └── .env.example                    # Relay 运行时环境变量模板
-├── mac-agent/                          # Mac 守护进程 (ai-audit-agent) + Hook 适配器 + 控制 CLI
+├── mac-agent/                          # Mac 守护进程 (ai-audit-agent) + Hook 适配器 + 悬浮审批窗 + 控制 CLI
 │   ├── config.example.json             # Mac 端配置模板 (~/.config/ai-audit/config.json)
+│   ├── prompt/main.swift               # 原生 macOS AppKit 悬浮审批卡片 (ai-audit-prompt)
 │   └── scripts/                        # install.sh / rollback.sh / ai-tmux / tmux.conf
 ├── android/                            # 原生 Android App (Kotlin + Jetpack Compose)
 │   ├── local.properties.example        # Android SDK 路径模板
