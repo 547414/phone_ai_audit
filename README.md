@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="docs/assets/vibe-hero.webp" alt="Phone AI Audit — Vibe Coding Anywhere" width="840" /><br />
-  <sub>躺平吹海风喝椰子水，手机一点「ALLOW ✓」，远端 AI 小弟团继续在 Mac 上疯狂输出代码</sub>
+  <sub>海边吊床喝椰子水，手机一点「ALLOW ✓」，远端 Mac 上的 AI 继续全速敲代码</sub>
 </p>
 
 一套面向个人开发工作流的移动端 AI 通知、远程审批、实时交互终端与远程文件 / Git 工作台系统：
