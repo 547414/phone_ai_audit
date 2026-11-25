@@ -1,0 +1,46 @@
+#!/bin/zsh
+# Launch or attach to a project-scoped tmux session seamlessly so the phone app can view & interact with it.
+# Usage:
+#   ai-tmux                  -> attach/create tmux session for current directory
+#   ai-tmux claude [args...] -> run claude inside project tmux session
+#   ai-tmux codex  [args...] -> run codex inside project tmux session
+#   ai-tmux agy    [args...] -> run agy inside project tmux session
+set -eu
+
+TMUX_BIN="$(command -v tmux || echo /opt/homebrew/bin/tmux)"
+if [[ ! -x "$TMUX_BIN" ]]; then
+  echo "tmux 未安装，请先运行: brew install tmux" >&2
+  exit 1
+fi
+
+sanitize() {
+  printf '%s' "$1" | tr -cs '[:alnum:]_-' '_' | sed 's/^_*//;s/_*$//'
+}
+
+dir_name="$(sanitize "$(basename "$PWD")")"
+[[ -z "$dir_name" ]] && dir_name="home"
+
+if [[ $# -eq 0 ]]; then
+  sess="sh-${dir_name}"
+  if [[ -n "${TMUX:-}" ]]; then
+    exec zsh -l
+  fi
+  exec "$TMUX_BIN" new-session -A -s "$sess" -c "$PWD"
+fi
+
+tool="$1"
+shift
+prefix="$(sanitize "$tool")"
+[[ -z "$prefix" ]] && prefix="ai"
+sess="${prefix}-${dir_name}"
+
+if [[ -n "${TMUX:-}" ]]; then
+  exec "$tool" "$@"
+fi
+
+if "$TMUX_BIN" has-session -t "$sess" 2>/dev/null; then
+  exec "$TMUX_BIN" attach-session -t "$sess"
+fi
+
+cmd_str="$(printf '%q ' "$tool" "$@")"
+exec "$TMUX_BIN" new-session -s "$sess" -c "$PWD" -- /bin/zsh -lc "export TERM=xterm-256color; ${cmd_str}; exec /bin/zsh -l"

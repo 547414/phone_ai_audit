@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="xterm.css" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #000000;
+      touch-action: none;
+    }
+    #viewport-wrap {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+      background: #000000;
+    }
+    #terminal {
+      display: inline-block;
+      padding: 6px;
+    }
+    #err {
+      display: none;
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      z-index: 99;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #3a1214;
+      color: #ffb4ab;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    .xterm-viewport {
+      overflow: hidden !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="err"></div>
+  <div id="viewport-wrap">
+    <div id="terminal"></div>
+  </div>
+  <script src="xterm.js"></script>
+  <script src="addon-fit.js"></script>
+  <script>
+    const errEl = document.getElementById('err');
+    const wrapEl = document.getElementById('viewport-wrap');
+    const termEl = document.getElementById('terminal');
+
+    function showErr(msg) {
+      errEl.style.display = 'block';
+      errEl.textContent = 'Terminal JS Error: ' + msg;
+    }
+    window.onerror = function(msg, src, line) {
+      showErr(msg + ' (' + line + ')');
+    };
+
+    const DARK_THEME = {
+      background: '#000000',
+      foreground: '#F2F2F7',
+      cursor: '#0A84FF',
+      cursorAccent: '#000000',
+      selectionBackground: '#264F78',
+      black: '#3A3A3C',
+      red: '#FF453A',
+      green: '#30D158',
+      yellow: '#FFD60A',
+      blue: '#0A84FF',
+      magenta: '#BF5AF2',
+      cyan: '#64D2FF',
+      white: '#E5E5EA',
+      brightBlack: '#636366',
+      brightRed: '#FF6961',
+      brightGreen: '#4CD964',
+      brightYellow: '#FFE620',
+      brightBlue: '#409CFF',
+      brightMagenta: '#DA8FFF',
+      brightCyan: '#70D7FF',
+      brightWhite: '#FFFFFF'
+    };
+
+    const LIGHT_THEME = {
+      background: '#FFFFFF',
+      foreground: '#1C1C1E',
+      cursor: '#007AFF',
+      cursorAccent: '#FFFFFF',
+      selectionBackground: '#B3D7FF',
+      black: '#1C1C1E',
+      red: '#D70015',
+      green: '#248A3D',
+      yellow: '#B25000',
+      blue: '#007AFF',
+      magenta: '#8944AB',
+      cyan: '#0071A4',
+      white: '#8E8E93',
+      brightBlack: '#636366',
+      brightRed: '#FF3B30',
+      brightGreen: '#34C759',
+      brightYellow: '#FF9500',
+      brightBlue: '#0A84FF',
+      brightMagenta: '#AF52DE',
+      brightCyan: '#32ADE6',
+      brightWhite: '#1C1C1E'
+    };
+
+    let term = null;
+    let fitAddon = null;
+    let readySent = false;
+    // Default to true: 1:1 mirror of Mac's native wide screen with free 2D panning (zero forced line wrap, zero dots on Mac)
+    let nativeWideMode = true;
+    let remoteCols = 135;
+    let remoteRows = 35;
+    let pendingChunks = [];
+
+    try {
+      const TermCtor = window.Terminal || (window.xterm && window.xterm.Terminal);
+      const FitCtor = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
+      if (!TermCtor) throw new Error('xterm.js Terminal constructor missing');
+      if (!FitCtor) throw new Error('FitAddon constructor missing');
+
+      term = new TermCtor({
+        cursorBlink: true,
+        convertEol: false,
+        fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, "Droid Sans Mono", monospace',
+        fontSize: 12,
+        lineHeight: 1.18,
+        scrollback: 5000,
+        cols: remoteCols,
+        rows: remoteRows,
+        theme: DARK_THEME
+      });
+
+      fitAddon = new FitCtor();
+      term.loadAddon(fitAddon);
+      term.open(termEl);
+
+      term.onData((data) => {
+        if (window.AndroidBridge && window.AndroidBridge.onInput) {
+          window.AndroidBridge.onInput(data);
+        }
+      });
+    } catch (e) {
+      showErr(e && e.message ? e.message : String(e));
+    }
+
+    function sendInputRaw(str) {
+      if (window.AndroidBridge && window.AndroidBridge.onInput) {
+        window.AndroidBridge.onInput(str);
+      }
+    }
+
+    function measureCell() {
+      const fs = (term && term.options && term.options.fontSize) ? term.options.fontSize : 12;
+      try {
+        const core = term && term._core;
+        const dims = core && core._renderService && core._renderService.dimensions;
+        if (dims && dims.css && dims.css.cell && dims.css.cell.width > 3 && dims.css.cell.height > 6) {
+          return { w: dims.css.cell.width, h: dims.css.cell.height };
+        }
+      } catch (e) {}
+      return { w: fs * 0.62, h: fs * 1.18 + 1.5 };
+    }
+
+    function applyLayout(notifyRemote) {
+      if (!term || !fitAddon) return;
+      const wrapRect = wrapEl.getBoundingClientRect();
+      if (wrapRect.width < 40 || wrapRect.height < 40) return;
+
+      let cols = remoteCols;
+      let rows = remoteRows;
+
+      try {
+        if (nativeWideMode) {
+          const cell = measureCell();
+          const pxW = Math.max(Math.ceil(cols * cell.w) + 18, Math.ceil(wrapRect.width));
+          const pxH = Math.max(Math.ceil(rows * cell.h) + 18, Math.ceil(wrapRect.height));
+          termEl.style.width = pxW + 'px';
+          termEl.style.height = pxH + 'px';
+          if (term.cols !== cols || term.rows !== rows) {
+            term.resize(cols, rows);
+          }
+        } else {
+          termEl.style.width = '100%';
+          termEl.style.height = '100%';
+          wrapEl.scrollLeft = 0;
+          wrapEl.scrollTop = 0;
+          const dims = fitAddon.proposeDimensions();
+          if (dims && dims.cols && dims.rows) {
+            cols = Math.max(dims.cols - 1, 20);
+            rows = Math.max(dims.rows, 8);
+            term.resize(cols, rows);
+          }
+        }
+      } catch (e) {}
+
+      if (!readySent && wrapRect.height >= 80) {
+        readySent = true;
+        if (window.AndroidBridge && window.AndroidBridge.onReady) {
+          window.AndroidBridge.onReady(cols, rows);
+        }
+        if (pendingChunks.length > 0) {
+          const copy = pendingChunks;
+          pendingChunks = [];
+          copy.forEach((b64) => window.writeBase64(b64));
+        }
+      } else if (readySent && notifyRemote && !nativeWideMode) {
+        if (window.AndroidBridge && window.AndroidBridge.onResize) {
+          window.AndroidBridge.onResize(cols, rows);
+        }
+      }
+    }
+
+    // Smooth 2D panning (left/right + up/down) + seamless handoff to tmux mouse-wheel history scroll
+    let touchActive = false;
+    let lastX = 0;
+    let lastY = 0;
+    let accumWheelY = 0;
+
+    wrapEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      touchActive = true;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+      accumWheelY = 0;
+    }, { passive: true });
+
+    wrapEl.addEventListener('touchmove', (e) => {
+      if (!touchActive || e.touches.length !== 1 || !term) return;
+      const curX = e.touches[0].clientX;
+      const curY = e.touches[0].clientY;
+      const dx = curX - lastX;
+      const dy = curY - lastY;
+      lastX = curX;
+      lastY = curY;
+
+      e.preventDefault();
+
+      // 1. Always allow smooth horizontal panning when terminal canvas is wider than viewport
+      const maxScrollX = Math.max(0, wrapEl.scrollWidth - wrapEl.clientWidth);
+      if (maxScrollX > 0 && Math.abs(dx) > 0) {
+        wrapEl.scrollLeft = Math.max(0, Math.min(maxScrollX, wrapEl.scrollLeft - dx));
+      }
+
+      // 2. Vertical drag: first pan viewport if Mac screen height > phone screen;
+      //    once at edge (top or bottom), forward SGR wheel into tmux history!
+      const maxScrollY = Math.max(0, wrapEl.scrollHeight - wrapEl.clientHeight);
+      const prevY = wrapEl.scrollTop;
+      let leftoverDy = dy;
+
+      if (maxScrollY > 0 && Math.abs(dy) > 0) {
+        const nextY = Math.max(0, Math.min(maxScrollY, prevY - dy));
+        wrapEl.scrollTop = nextY;
+        const consumed = prevY - nextY;
+        leftoverDy = dy - consumed;
+      }
+
+      // Only trigger tmux history scroll when user clearly drags vertically past the viewport edge
+      if (Math.abs(leftoverDy) > 0 && Math.abs(dy) >= Math.abs(dx) * 0.8) {
+        accumWheelY += leftoverDy;
+        const stepPx = 24;
+        const steps = Math.trunc(accumWheelY / stepPx);
+        if (steps !== 0) {
+          accumWheelY -= steps * stepPx;
+          const scrollUp = steps > 0;
+          const count = Math.min(Math.abs(steps), 5);
+          const isAlt = term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+          if (isAlt) {
+            const code = scrollUp ? 64 : 65;
+            const seq = '\x1b[<' + code + ';10;10M';
+            for (let i = 0; i < count; i++) {
+              sendInputRaw(seq);
+            }
+          } else {
+            term.scrollLines(scrollUp ? -count * 2 : count * 2);
+          }
+        }
+      }
+    }, { passive: false });
+
+    wrapEl.addEventListener('touchend', () => {
+      touchActive = false;
+      accumWheelY = 0;
+    }, { passive: true });
+
+    window.setRemoteSize = function(cols, rows) {
+      if (cols >= 20 && rows >= 8) {
+        remoteCols = cols;
+        remoteRows = rows;
+        if (nativeWideMode) {
+          applyLayout(false);
+          setTimeout(() => {
+            wrapEl.scrollTop = Math.max(0, wrapEl.scrollHeight - wrapEl.clientHeight);
+          }, 80);
+        }
+      }
+    };
+
+    window.setWideMode = function(enabled) {
+      nativeWideMode = !!enabled;
+      applyLayout(!nativeWideMode);
+      if (nativeWideMode) {
+        setTimeout(() => {
+          wrapEl.scrollTop = Math.max(0, wrapEl.scrollHeight - wrapEl.clientHeight);
+        }, 60);
+      }
+    };
+
+    window.writeBase64 = function(b64) {
+      if (!term) {
+        pendingChunks.push(b64);
+        return;
+      }
+      try {
+        const wasNearBottom = (wrapEl.scrollHeight - wrapEl.clientHeight - wrapEl.scrollTop) < 60;
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) {
+          bytes[i] = bin.charCodeAt(i);
+        }
+        term.write(bytes, () => {
+          if (nativeWideMode && wasNearBottom && !touchActive) {
+            wrapEl.scrollTop = Math.max(0, wrapEl.scrollHeight - wrapEl.clientHeight);
+          }
+        });
+      } catch (e) {
+        showErr('decode error: ' + e.message);
+      }
+    };
+
+    window.writeSystemLine = function(text) {
+      if (!term) return;
+      term.writeln('\x1b[36m' + text + '\x1b[0m');
+    };
+
+    window.clearTerm = function() {
+      if (term) term.reset();
+    };
+
+    window.setFontSize = function(px) {
+      if (!term) return;
+      term.options.fontSize = px;
+      applyLayout(false);
+    };
+
+    window.setTheme = function(isDark) {
+      const bg = isDark ? '#000000' : '#FFFFFF';
+      document.documentElement.style.background = bg;
+      document.body.style.background = bg;
+      wrapEl.style.background = bg;
+      if (term) {
+        term.options.theme = isDark ? DARK_THEME : LIGHT_THEME;
+      }
+    };
+
+    window.scrollToCursor = function() {
+      if (!term) return;
+      try {
+        const buf = term.buffer && term.buffer.active;
+        const cell = measureCell();
+        const cx = buf ? buf.cursorX : 0;
+        const cy = buf ? buf.cursorY : (remoteRows - 1);
+        const pad = 6;
+        const cursorPxX = pad + cx * cell.w;
+        const cursorPxY = pad + (cy + 1) * cell.h;
+
+        // Vertical: bring cursor line into lower third above the keyboard/input bar
+        const maxY = Math.max(0, wrapEl.scrollHeight - wrapEl.clientHeight);
+        if (maxY > 0) {
+          const desiredTop = cursorPxY - wrapEl.clientHeight + cell.h * 3.5;
+          wrapEl.scrollTop = Math.max(0, Math.min(maxY, desiredTop));
+        }
+
+        // Horizontal: ensure cursor X is comfortably visible (prefer left edge when prompt is near col 0)
+        const maxX = Math.max(0, wrapEl.scrollWidth - wrapEl.clientWidth);
+        if (maxX > 0) {
+          if (cursorPxX < wrapEl.clientWidth * 0.65) {
+            wrapEl.scrollLeft = 0;
+          } else {
+            const desiredLeft = cursorPxX - wrapEl.clientWidth * 0.45;
+            wrapEl.scrollLeft = Math.max(0, Math.min(maxX, desiredLeft));
+          }
+        }
+      } catch (e) {}
+    };
+
+    window.fitNow = function() {
+      applyLayout(false);
+    };
+
+    let lastWrapH = wrapEl.clientHeight || 0;
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        const curH = wrapEl.clientHeight || 0;
+        const shrunk = lastWrapH > 0 && curH < lastWrapH - 40;
+        lastWrapH = curH;
+        setTimeout(() => {
+          applyLayout(false);
+          if (shrunk) {
+            window.scrollToCursor();
+          }
+        }, 30);
+      });
+      ro.observe(wrapEl);
+    }
+    window.addEventListener('resize', () => setTimeout(() => {
+      applyLayout(false);
+      window.scrollToCursor();
+    }, 50));
+
+    let tries = 0;
+    const bootTimer = setInterval(() => {
+      tries++;
+      applyLayout(false);
+      if (readySent || tries >= 20) clearInterval(bootTimer);
+    }, 60);
+  </script>
+</body>
+</html>

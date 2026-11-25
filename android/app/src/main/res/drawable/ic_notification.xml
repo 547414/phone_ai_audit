@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Apple SF-Symbol style Mac Terminal window silhouette + ">_" matching the new App Logo -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.0"
+        android:strokeLineJoin="round"
+        android:pathData="M6,3.5 L18,3.5 A3.5,3.5 0 0,1 21.5,7 L21.5,17 A3.5,3.5 0 0,1 18,20.5 L6,20.5 A3.5,3.5 0 0,1 2.5,17 L2.5,7 A3.5,3.5 0 0,1 6,3.5 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.1"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6.8,8.6 L11.0,12.1 L6.8,15.6" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.1"
+        android:strokeLineCap="round"
+        android:pathData="M12.8,15.5 L17.6,15.5" />
+</vector>

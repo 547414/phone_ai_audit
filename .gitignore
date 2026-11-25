@@ -1,0 +1,46 @@
+# Local personal configuration (copy from *.example files)
+config.env
+relay/.env
+mac-agent/config.json
+android/local.properties
+deploy/nginx-audit.conf
+deploy/nginx-audit-*.conf
+deploy/ai-audit-relay.service
+*.local.env
+*.local.json
+
+# Private design notes & compiled release artifacts
+ANALYSIS.md
+FILE_AND_GIT_ANALYSIS.md
+dist/
+
+# Runtime data, backups & logs
+relay/data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.bak
+
+# macOS / Editor / IDE
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Android / Gradle
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/captures/
+android/.cxx/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Go
+*.out
+*.test

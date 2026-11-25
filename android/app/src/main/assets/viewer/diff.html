@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes" />
+<style>
+  :root {
+    --bg: #000000;
+    --fg: #F2F2F7;
+    --gutter-bg: #111113;
+    --gutter-fg: #636366;
+    --border: #2C2C2E;
+    --add-bg: rgba(48, 209, 88, 0.16);
+    --add-gutter: rgba(48, 209, 88, 0.26);
+    --add-fg: #7EE787;
+    --del-bg: rgba(255, 69, 58, 0.18);
+    --del-gutter: rgba(255, 69, 58, 0.28);
+    --del-fg: #FFA198;
+    --hunk-bg: rgba(10, 132, 255, 0.16);
+    --hunk-fg: #79C0FF;
+    --meta-bg: #1C1C1E;
+    --meta-fg: #98989F;
+  }
+  body.light {
+    --bg: #FFFFFF;
+    --fg: #1C1C1E;
+    --gutter-bg: #F2F2F7;
+    --gutter-fg: #8E8E93;
+    --border: #E5E5EA;
+    --add-bg: #E6FFEC;
+    --add-gutter: #CCFFD8;
+    --add-fg: #1A7F37;
+    --del-bg: #FFEBE9;
+    --del-gutter: #FFD7D5;
+    --del-fg: #CF222E;
+    --hunk-bg: #DDF4FF;
+    --hunk-fg: #0969DA;
+    --meta-bg: #F6F8FA;
+    --meta-fg: #57606A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px; line-height: 1.55;
+  }
+  #wrap { width: 100%; overflow-x: auto; padding-bottom: 40px; }
+  table { border-collapse: collapse; min-width: 100%; }
+  table.wrap td.code { white-space: pre-wrap; word-break: break-all; }
+  td.ln {
+    user-select: none; -webkit-user-select: none;
+    text-align: right; vertical-align: top;
+    padding: 0 7px; min-width: 36px;
+    color: var(--gutter-fg); background: var(--gutter-bg);
+    border-right: 1px solid var(--border);
+    font-size: 11px;
+  }
+  td.code {
+    padding: 0 12px 0 8px;
+    white-space: pre; tab-size: 4; vertical-align: top;
+  }
+  tr.add td.code { background: var(--add-bg); }
+  tr.add td.ln { background: var(--add-gutter); color: var(--add-fg); }
+  tr.del td.code { background: var(--del-bg); }
+  tr.del td.ln { background: var(--del-gutter); color: var(--del-fg); }
+  tr.hunk td { background: var(--hunk-bg); color: var(--hunk-fg); padding-top: 4px; padding-bottom: 4px; font-weight: 600; }
+  tr.meta td { background: var(--meta-bg); color: var(--meta-fg); padding-top: 3px; padding-bottom: 3px; font-weight: 600; }
+  .empty { padding: 36px 20px; text-align: center; color: var(--meta-fg); font-family: -apple-system, sans-serif; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="wrap"><table id="tbl"></table></div>
+<script>
+function setTheme(isDark) {
+  document.body.classList.toggle('light', !isDark);
+}
+function setWrap(on) {
+  document.getElementById('tbl').classList.toggle('wrap', !!on);
+}
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function renderDiff(diffText, isDark) {
+  setTheme(isDark);
+  const tbl = document.getElementById('tbl');
+  if (!diffText || !diffText.trim()) {
+    tbl.innerHTML = '<tr><td colspan="3" class="empty">无文本差异</td></tr>';
+    return;
+  }
+  const lines = diffText.replace(/\r\n/g, '\n').split('\n');
+  let oldLn = 0, newLn = 0;
+  const rows = [];
+  const hunkRe = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('diff --git ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('new file') || line.startsWith('deleted file')) {
+      rows.push('<tr class="meta"><td class="ln"></td><td class="ln"></td><td class="code">' + esc(line) + '</td></tr>');
+    } else if (line.startsWith('@@')) {
+      const m = hunkRe.exec(line);
+      if (m) {
+        oldLn = parseInt(m[1], 10);
+        newLn = parseInt(m[2], 10);
+      }
+      rows.push('<tr class="hunk"><td class="ln">...</td><td class="ln">...</td><td class="code">' + esc(line) + '</td></tr>');
+    } else if (line.startsWith('+')) {
+      rows.push('<tr class="add"><td class="ln"></td><td class="ln">' + newLn + '</td><td class="code">' + esc(line) + '</td></tr>');
+      newLn++;
+    } else if (line.startsWith('-')) {
+      rows.push('<tr class="del"><td class="ln">' + oldLn + '</td><td class="ln"></td><td class="code">' + esc(line) + '</td></tr>');
+      oldLn++;
+    } else {
+      const o = oldLn > 0 ? oldLn : '';
+      const n = newLn > 0 ? newLn : '';
+      rows.push('<tr><td class="ln">' + o + '</td><td class="ln">' + n + '</td><td class="code">' + esc(line) + '</td></tr>');
+      if (oldLn > 0) oldLn++;
+      if (newLn > 0) newLn++;
+    }
+  }
+  tbl.innerHTML = rows.join('');
+}
+window.renderDiff = renderDiff;
+window.setTheme = setTheme;
+window.setWrap = setWrap;
+</script>
+</body>
+</html>

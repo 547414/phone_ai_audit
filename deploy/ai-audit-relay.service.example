@@ -1,0 +1,20 @@
+[Unit]
+Description=Phone AI Audit Relay Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{RELAY_REMOTE_USER}}
+Group={{RELAY_REMOTE_GROUP}}
+WorkingDirectory={{RELAY_REMOTE_DIR}}
+EnvironmentFile={{RELAY_REMOTE_DIR}}/.env
+ExecStart={{RELAY_REMOTE_DIR}}/ai-audit-relay
+Restart=always
+RestartSec=3
+MemoryMax=64M
+NoNewPrivileges=true
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

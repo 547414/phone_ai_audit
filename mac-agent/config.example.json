@@ -1,0 +1,10 @@
+{
+  "server_url": "https://audit.example.com:9876",
+  "mac_token": "replace-with-strong-random-mac-token",
+  "app_token": "replace-with-strong-random-app-token",
+  "socket_path": "~/.local/run/ai-audit.sock",
+  "hostname": "my-mac",
+  "file_roots": [
+    "~/workspace"
+  ]
+}

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes" />
+<link id="hljs-theme" rel="stylesheet" href="hljs-dark.css" />
+<style>
+  :root {
+    --bg: #000000;
+    --card: #1C1C1E;
+    --fg: #F2F2F7;
+    --sub: #98989F;
+    --accent: #0A84FF;
+    --border: #2C2C2E;
+    --code-bg: #161618;
+  }
+  body.light {
+    --bg: #FFFFFF;
+    --card: #F2F2F7;
+    --fg: #1C1C1E;
+    --sub: #6C6C70;
+    --accent: #007AFF;
+    --border: #E5E5EA;
+    --code-bg: #F5F5F7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 16px 48px 16px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    font-size: 15px; line-height: 1.72;
+    word-wrap: break-word;
+  }
+  h1, h2, h3, h4 { font-weight: 650; line-height: 1.35; margin: 1.25em 0 0.55em; }
+  h1 { font-size: 1.55em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  h2 { font-size: 1.3em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 1.12em; }
+  p { margin: 0.7em 0; }
+  a { color: var(--accent); text-decoration: none; }
+  blockquote {
+    margin: 0.9em 0; padding: 8px 14px;
+    border-left: 3.5px solid var(--accent);
+    background: var(--card); border-radius: 0 10px 10px 0;
+    color: var(--sub);
+  }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 2px 5px; border-radius: 5px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  pre code { background: transparent; padding: 0; font-size: 12.5px; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 1em 0;
+    display: block; overflow-x: auto;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px; text-align: left; font-size: 13.5px;
+  }
+  th { background: var(--card); font-weight: 600; }
+  img { max-width: 100%; height: auto; border-radius: 10px; margin: 8px 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
+  ul, ol { padding-left: 1.4em; margin: 0.6em 0; }
+  li { margin: 0.28em 0; }
+  input[type="checkbox"] { margin-right: 6px; }
+</style>
+<script src="marked.min.js"></script>
+<script src="highlight.min.js"></script>
+</head>
+<body>
+<article id="md"></article>
+<script>
+function setTheme(isDark) {
+  document.body.classList.toggle('light', !isDark);
+  document.getElementById('hljs-theme').href = isDark ? 'hljs-dark.css' : 'hljs-light.css';
+}
+
+function renderMarkdown(mdText, isDark) {
+  setTheme(isDark);
+  const el = document.getElementById('md');
+  try {
+    marked.setOptions({ gfm: true, breaks: true });
+    el.innerHTML = marked.parse(mdText || '');
+    if (window.hljs) {
+      el.querySelectorAll('pre code').forEach(block => {
+        try { hljs.highlightElement(block); } catch (e) {}
+      });
+    }
+  } catch (e) {
+    el.textContent = mdText || '';
+  }
+}
+
+window.renderMarkdown = renderMarkdown;
+window.setTheme = setTheme;
+</script>
+</body>
+</html>

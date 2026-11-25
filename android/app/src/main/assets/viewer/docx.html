@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes" />
+<style>
+  :root { --bg: #000000; --fg: #F2F2F7; --border: #2C2C2E; --card: #1C1C1E; }
+  body.light { --bg: #FFFFFF; --fg: #1C1C1E; --border: #E5E5EA; --card: #F2F2F7; }
+  body {
+    margin: 0; padding: 18px 16px 48px 16px;
+    background: var(--bg) !important; color: var(--fg) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif !important;
+    font-size: 15px !important; line-height: 1.72 !important;
+    word-wrap: break-word;
+  }
+  #doc * { color: inherit !important; background-color: transparent !important; max-width: 100% !important; }
+  #doc table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; margin: 12px 0; }
+  #doc td, #doc th { border: 1px solid var(--border) !important; padding: 6px 8px; }
+  #doc p { margin: 0.6em 0; }
+</style>
+</head>
+<body>
+<div id="doc"></div>
+<script>
+function setTheme(isDark) {
+  document.body.classList.toggle('light', !isDark);
+}
+function renderDocHtml(rawHtml, isDark) {
+  setTheme(isDark);
+  const el = document.getElementById('doc');
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(rawHtml || '', 'text/html');
+    // Strip scripts/styles from converted document so theme applies cleanly
+    doc.querySelectorAll('script,style,meta,link').forEach(n => n.remove());
+    el.innerHTML = doc.body ? doc.body.innerHTML : (rawHtml || '');
+  } catch (e) {
+    el.innerHTML = rawHtml || '';
+  }
+}
+window.renderDocHtml = renderDocHtml;
+window.setTheme = setTheme;
+</script>
+</body>
+</html>
