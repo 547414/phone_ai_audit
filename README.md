@@ -11,12 +11,13 @@
 >
 > 别人苦守工位熬到凌晨三点给 AI 点确认，你却在海边躺吊床、地铁扶吊环、被窝撸大橘——手机轻轻一点，远端 Mac 上的 **Claude Code / OpenAI Codex / Antigravity** 瞬间满血开工，审批、终端、看代码、Diff、Commit、Push 一条龙全包！
 
-### 🔥 四大逆天金手指
+### 🔥 五大逆天金手指
 
 - **👑 三大 AI 统统归你差遣**：全面接管 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)**，任务完成、突发报错、等待回答、高危权限审批，第一时间秒推到你手里；
 - **⚡ 通知栏一键生杀大权（支持双端同步）**：锁屏下拉直接点 **允许 / 拒绝（顺手回一句理由）/ 退回电脑**；开启 **双端同步 (`both`)** 模式后，Mac 右上角原生悬浮窗与手机通知栏同步弹起，**哪边先点以哪边为准，另一端秒消失**，删库跑路等高危命令自带指纹/面容二次门禁；
 - **🕶️ 加密暗道直连 Mac 终端**：内置 `xterm.js` + `tmux` 反向隧道，**无需暴露 Mac SSH 22 端口**，随时切进正在干活的 AI 终端，还能手机一键拉起新终端（Mac 端同步弹出窗口），自带可拖动方向键/快捷键手柄 + 独立中文提示词输入条；
-- **📂 免下载远程翻代码 & 一键 Push**：按需流式传输不落盘，支持文件名与 `rg` 全文秒搜、代码语法高亮预览、在线改代码（保存前强制 Diff + SHA256 乐观锁防误覆盖）、Markdown / 图片 / PDF / Office / 音视频直看，更有移动端 **Git 工作台**（红绿 Diff、精准勾选批量 Commit、安全 Push）。
+- **📂 免下载远程翻代码 & 一键 Push**：按需流式传输不落盘，支持文件名与 `rg` 全文秒搜、代码语法高亮预览、在线改代码（保存前强制 Diff + SHA256 乐观锁防误覆盖）、Markdown / 图片 / PDF / Office / 音视频直看，更有移动端 **Git 工作台**（红绿 Diff、精准勾选批量 Commit、安全 Push）；
+- **📊 零负担 Agent 用量 & 配额看板（Mac 网页 + 手机 App 双端同步）**：`mac-agent` 内置增量游标日志扫描器与持久化聚合缓存（默认本机 `http://127.0.0.1:9878`，手机 App 内置「用量」Tab），一次查看 **Claude Code / Codex / Antigravity** 的 **近 5 小时 / 今日 / 本周 / 本月 / 历史总用量**、**5 小时与周重置倒计时**、**分模型明细** 与 **近 14 天趋势图**，待机 0% CPU、日常增量刷新毫秒级。
 
 ---
 
@@ -164,8 +165,9 @@ phone_ai_audit/
 │   └── screenshots/                    # README 实机脱敏 WebP 截图与动态演示
 ├── relay/                              # Linux Go 中转服务 (ai-audit-relay, SQLite WAL, 极低内存占用)
 │   └── .env.example                    # Relay 运行时环境变量模板
-├── mac-agent/                          # Mac 守护进程 (ai-audit-agent) + Hook 适配器 + 悬浮审批窗 + 控制 CLI
+├── mac-agent/                          # Mac 守护进程 (ai-audit-agent) + 用量网页看板 + Hook 适配器 + 悬浮审批窗 + 控制 CLI
 │   ├── config.example.json             # Mac 端配置模板 (~/.config/ai-audit/config.json)
+│   ├── internal/usage/                 # 增量游标用量统计引擎与内嵌本机网页看板 (127.0.0.1:9878)
 │   ├── prompt/main.swift               # 原生 macOS AppKit 悬浮审批卡片 (ai-audit-prompt)
 │   └── scripts/                        # install.sh / rollback.sh / ai-tmux / tmux.conf
 ├── android/                            # 原生 Android App (Kotlin + Jetpack Compose)
@@ -259,6 +261,12 @@ swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 ```bash
 # 查看中转、手机在线状态、当前审批模式与活跃 tmux 会话
 ai-audit status
+
+# 查看 Claude Code / Codex / Antigravity 用量与 5h / 周重置倒计时
+ai-audit usage
+
+# 在本机浏览器一键打开 Agent 用量网页看板（默认 http://127.0.0.1:9878）
+ai-audit web
 
 # 切换四种审批模式：
 #   auto   = 智能离座（人在电脑前走本地弹窗，离座 60s 或锁屏自动转交手机）

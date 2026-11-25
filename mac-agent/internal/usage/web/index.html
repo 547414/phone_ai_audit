@@ -1,0 +1,1412 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Agent 用量 · Phone AI Audit</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f2f2f7;
+      --card: #ffffff;
+      --fill: rgba(120, 120, 128, 0.10);
+      --fill-strong: rgba(120, 120, 128, 0.16);
+      --seg-bg: rgba(118, 118, 128, 0.12);
+      --seg-active: #ffffff;
+      --seg-shadow: 0 1px 3px rgba(0, 0, 0, 0.10), 0 1px 1px rgba(0, 0, 0, 0.04);
+      --nav-bg: rgba(242, 242, 247, 0.78);
+      --sep: rgba(60, 60, 67, 0.12);
+      --sep-strong: rgba(60, 60, 67, 0.18);
+      --label: #000000;
+      --label-2: #6c6c70;
+      --label-3: #8e8e93;
+      --accent: #007aff;
+      --green: #34c759;
+      --orange: #ff9500;
+      --red: #ff3b30;
+      --claude: #d97757;
+      --codex: #10a37f;
+      --agy: #007aff;
+      --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 20px rgba(0, 0, 0, 0.03);
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #000000;
+      --card: #1c1c1e;
+      --fill: #2c2c2e;
+      --fill-strong: #3a3a3c;
+      --seg-bg: rgba(118, 118, 128, 0.24);
+      --seg-active: #636366;
+      --seg-shadow: 0 1px 3px rgba(0, 0, 0, 0.32);
+      --nav-bg: rgba(0, 0, 0, 0.76);
+      --sep: rgba(84, 84, 88, 0.42);
+      --sep-strong: rgba(84, 84, 88, 0.65);
+      --label: #ffffff;
+      --label-2: #98989f;
+      --label-3: #6e6e73;
+      --accent: #0a84ff;
+      --green: #30d158;
+      --orange: #ff9f0a;
+      --red: #ff453a;
+      --claude: #e08364;
+      --codex: #2ac19a;
+      --agy: #0a84ff;
+      --card-shadow: none;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--label);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Sticky iOS Translucent Navigation Bar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: var(--nav-bg);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 0.5px solid var(--sep);
+    }
+    .topbar-inner {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .nav-left {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      min-width: 0;
+    }
+    .nav-title {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+    }
+    .host-tag {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--label-2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    /* iOS Segmented Control */
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px;
+      background: var(--seg-bg);
+      border-radius: 9px;
+      gap: 2px;
+    }
+    .segmented button {
+      border: none;
+      background: transparent;
+      color: var(--label-2);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 5px 11px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+      white-space: nowrap;
+    }
+    .segmented button:hover {
+      color: var(--label);
+    }
+    .segmented button.active {
+      background: var(--seg-active);
+      color: var(--label);
+      box-shadow: var(--seg-shadow);
+    }
+
+    /* iOS Capsule Action Button */
+    .ios-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.12s ease, background 0.15s ease;
+      white-space: nowrap;
+    }
+    .ios-btn:hover {
+      background: color-mix(in srgb, var(--accent) 20%, transparent);
+    }
+    .ios-btn:active { transform: scale(0.97); }
+    .ios-btn:disabled { opacity: 0.5; cursor: wait; }
+    .ios-btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+    .ios-btn.spinning svg {
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Main Centered Canvas */
+    .page {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 26px 24px 64px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .err-banner {
+      display: none;
+      padding: 13px 16px;
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--red) 14%, transparent);
+      color: var(--red);
+      font-size: 13.5px;
+      font-weight: 500;
+    }
+
+    /* iOS Section Header */
+    .section-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 6px;
+      flex-wrap: wrap;
+    }
+    .section-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--label-2);
+      letter-spacing: -0.005em;
+    }
+    .section-meta {
+      font-size: 12.5px;
+      color: var(--label-3);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* iOS Grouped Card */
+    .ios-card {
+      background: var(--card);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--card-shadow);
+      overflow: hidden;
+    }
+
+    /* Hero Overview Card (Apple Screen Time / Health Style) */
+    .hero-card {
+      padding: 24px 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .hero-top {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .hero-label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--label-2);
+      margin-bottom: 6px;
+    }
+    .hero-number-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .hero-value {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      font-size: 44px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      font-variant-numeric: tabular-nums;
+    }
+    .hero-unit {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--label-2);
+    }
+    .hero-detail {
+      font-size: 13px;
+      color: var(--label-2);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      line-height: 1.5;
+    }
+
+    /* Proportional Distribution Bar */
+    .share-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .share-bar {
+      height: 10px;
+      border-radius: 999px;
+      background: var(--fill);
+      overflow: hidden;
+      display: flex;
+      gap: 2px;
+    }
+    .share-seg {
+      height: 100%;
+      transition: width 0.35s ease;
+    }
+    .share-seg:first-child { border-radius: 999px 0 0 999px; }
+    .share-seg:last-child { border-radius: 0 999px 999px 0; }
+    .share-seg:only-child { border-radius: 999px; }
+    .share-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      font-size: 13px;
+      color: var(--label-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .share-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .share-legend-item strong {
+      color: var(--label);
+      font-weight: 600;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+
+    /* 4-Column Metric Strip Inside Hero */
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-top: 0.5px solid var(--sep);
+      padding-top: 18px;
+      gap: 16px;
+    }
+    .kpi-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      padding-right: 12px;
+      border-right: 0.5px solid var(--sep);
+    }
+    .kpi-item:last-child {
+      border-right: none;
+      padding-right: 0;
+    }
+    .kpi-k {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--label-2);
+    }
+    .kpi-v {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi-s {
+      font-size: 12px;
+      color: var(--label-3);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Spacious Vertical Stack of Agent Cards */
+    .agents-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .agent-card {
+      padding: 22px 26px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .agent-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .agent-id {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 0;
+    }
+    .agent-badge-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .agent-name {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+    .plan-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .agent-right-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--label-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .status-chip {
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--fill);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--label-2);
+    }
+
+    /* Balanced Two-Zone Body inside Each Agent Card */
+    .agent-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    /* Left Zone: iOS Inset Quota Group */
+    .quota-group {
+      background: var(--fill);
+      border-radius: var(--radius-md);
+      padding: 4px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-width: 0;
+    }
+    .quota-item {
+      padding: 12px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 0;
+    }
+    .quota-item + .quota-item {
+      border-top: 0.5px solid var(--sep);
+    }
+    .quota-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .quota-label {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--label);
+    }
+    .quota-val {
+      font-size: 14px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .progress-track {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--fill-strong);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+    .quota-sub {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--label-2);
+      font-variant-numeric: tabular-nums;
+      flex-wrap: wrap;
+    }
+    .quota-note {
+      font-size: 11.5px;
+      color: var(--label-3);
+      line-height: 1.4;
+    }
+
+    /* Right Zone: 2x2 Clean Stat Tiles */
+    .stat-quad {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      min-width: 0;
+    }
+    .stat-tile {
+      background: var(--fill);
+      border-radius: var(--radius-md);
+      padding: 13px 15px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    .stat-tile .k {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--label-2);
+    }
+    .stat-tile .v {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      font-size: 21px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .stat-tile.emphasis .v {
+      color: var(--label);
+    }
+
+    /* Spacious Model Breakdown List (Zero Overflow by Design!) */
+    .models-section {
+      border-top: 0.5px solid var(--sep);
+      padding-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .models-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .models-bar-left {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .models-heading {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--label-2);
+    }
+    .models-files {
+      font-size: 12px;
+      color: var(--label-3);
+      font-variant-numeric: tabular-nums;
+    }
+    .text-link-btn {
+      border: none;
+      background: transparent;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 2px 4px;
+      cursor: pointer;
+    }
+    .text-link-btn:hover { opacity: 0.78; }
+
+    .model-list {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .model-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 1.9fr) minmax(70px, 0.9fr) repeat(4, minmax(66px, 0.75fr));
+      align-items: center;
+      gap: 12px;
+      padding: 9px 2px;
+      font-size: 13.5px;
+      font-variant-numeric: tabular-nums;
+      min-width: 0;
+    }
+    .model-row + .model-row {
+      border-top: 0.5px solid var(--sep);
+    }
+    .model-row.head {
+      padding: 6px 2px 8px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--label-3);
+    }
+    .model-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+      color: var(--label);
+    }
+    .model-row.head .model-name {
+      font-weight: 500;
+      color: var(--label-3);
+    }
+    .model-bar-cell {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+    .mini-bar-track {
+      width: 100%;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--fill);
+      overflow: hidden;
+    }
+    .mini-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+    }
+    .model-num {
+      text-align: right;
+      white-space: nowrap;
+      color: var(--label-2);
+    }
+    .model-num.total {
+      color: var(--label);
+      font-weight: 600;
+    }
+    .model-row.head .model-num,
+    .model-row.head .model-num.total {
+      color: var(--label-3);
+      font-weight: 500;
+    }
+
+    .history-footnote {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 10px 13px;
+      border-radius: var(--radius-sm);
+      background: var(--fill);
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--label-2);
+    }
+    .history-footnote .info-icon {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      color: var(--label-3);
+    }
+
+    /* 14-Day Trend Card (Apple Screen Time Chart) */
+    .chart-card {
+      padding: 22px 26px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .chart-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .chart-title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .chart-title {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+    .chart-subtitle {
+      font-size: 12.5px;
+      color: var(--label-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .chart-stage {
+      position: relative;
+      padding-top: 4px;
+    }
+    .bars-grid {
+      display: grid;
+      grid-template-columns: repeat(14, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+      height: 196px;
+      position: relative;
+    }
+    .bars-grid::before,
+    .bars-grid::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: var(--sep);
+      pointer-events: none;
+    }
+    .bars-grid::before { bottom: 96px; }
+    .bars-grid::after { bottom: 164px; }
+    .bar-col {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 100%;
+      cursor: pointer;
+      min-width: 0;
+      border-radius: 8px;
+      padding: 2px 0;
+      transition: opacity 0.15s ease;
+    }
+    .bar-col.dimmed { opacity: 0.45; }
+    .bar-val {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--label-2);
+      margin-bottom: 5px;
+      height: 15px;
+      line-height: 15px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .bar-col.selected .bar-val {
+      color: var(--label);
+      font-weight: 700;
+    }
+    .bar-stack {
+      width: 100%;
+      max-width: 28px;
+      display: flex;
+      flex-direction: column-reverse;
+      border-radius: 7px 7px 3px 3px;
+      overflow: hidden;
+      min-height: 4px;
+      background: var(--fill);
+      transition: height 0.28s ease, box-shadow 0.15s ease;
+    }
+    .bar-col.selected .bar-stack {
+      box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px var(--accent);
+    }
+    .bar-seg {
+      width: 100%;
+    }
+    .bar-day {
+      font-size: 11px;
+      height: 20px;
+      line-height: 20px;
+      color: var(--label-3);
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .bar-col.selected .bar-day {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .day-inspector {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      background: var(--fill);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .day-inspector-date {
+      font-weight: 600;
+      color: var(--label);
+    }
+    .day-inspector-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      color: var(--label-2);
+    }
+    .day-inspector-items span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .day-inspector-items strong {
+      color: var(--label);
+      font-weight: 600;
+    }
+
+    .page-footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--label-3);
+      line-height: 1.7;
+      padding: 4px 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Responsive Breakpoints */
+    @media (max-width: 820px) {
+      .kpi-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .kpi-item {
+        border-right: none;
+        padding-right: 0;
+        padding-bottom: 4px;
+      }
+      .agent-body {
+        grid-template-columns: 1fr;
+      }
+      .model-row {
+        grid-template-columns: minmax(120px, 1.8fr) repeat(4, minmax(56px, 0.75fr));
+      }
+      .model-bar-cell {
+        display: none;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .topbar-inner { padding: 12px 16px; }
+      .page { padding: 18px 16px 48px; gap: 22px; }
+      .hero-card, .agent-card, .chart-card { padding: 18px; }
+      .hero-value { font-size: 36px; }
+      .hero-detail { text-align: left; }
+      .model-row {
+        grid-template-columns: minmax(110px, 1.8fr) repeat(2, minmax(64px, auto));
+        gap: 8px;
+        font-size: 13px;
+      }
+      .model-col-today, .model-col-week {
+        display: none;
+      }
+      .bars-grid { gap: 5px; height: 170px; }
+      .bar-val { display: none; }
+      .bar-day { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="nav-left">
+        <h1 class="nav-title">Agent 用量</h1>
+        <span class="host-tag" id="hostLabel">Mac</span>
+      </div>
+      <div class="nav-actions">
+        <div class="segmented" role="group" aria-label="外观主题">
+          <button id="themeLightBtn" type="button">浅色</button>
+          <button id="themeDarkBtn" type="button">深色</button>
+        </div>
+        <button id="refreshBtn" class="ios-btn" type="button">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M16.5 10a6.5 6.5 0 1 1-1.7-4.38"/>
+            <path d="M16.5 3.5v3.2h-3.2"/>
+          </svg>
+          <span id="refreshLabel">刷新</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="err-banner" id="errBox"></div>
+
+    <section class="section-group">
+      <div class="section-head">
+        <span class="section-title">总览</span>
+        <span class="section-meta" id="scanMeta">正在加载本地增量统计...</span>
+      </div>
+      <div class="ios-card hero-card" id="heroCard"></div>
+    </section>
+
+    <section class="section-group">
+      <div class="section-head">
+        <span class="section-title">各 Agent 配额与明细</span>
+        <span class="section-meta" id="updatedMeta"></span>
+      </div>
+      <div class="agents-stack" id="agentsStack"></div>
+    </section>
+
+    <section class="section-group">
+      <div class="section-head">
+        <span class="section-title">活跃趋势</span>
+      </div>
+      <div class="ios-card chart-card">
+        <div class="chart-top">
+          <div class="chart-title-block">
+            <h2 class="chart-title">近 14 天用量趋势</h2>
+            <span class="chart-subtitle" id="chartSubtitle">点击任意柱子查看当日各 Agent 明细</span>
+          </div>
+          <div class="segmented" id="chartFilter" role="group" aria-label="筛选 Agent">
+            <button type="button" data-filter="all" class="active">全部</button>
+            <button type="button" data-filter="claude">Claude</button>
+            <button type="button" data-filter="codex">Codex</button>
+            <button type="button" data-filter="agy">Antigravity</button>
+          </div>
+        </div>
+        <div class="chart-stage">
+          <div class="bars-grid" id="dailyChart"></div>
+        </div>
+        <div class="day-inspector" id="dayInspector"></div>
+      </div>
+    </section>
+
+    <footer class="page-footer" id="pageFooter">
+      持久化聚合缓存低占用运行中 · 每 60 秒自动增量刷新 · 倒计时每秒本地更新
+    </footer>
+  </main>
+
+  <script>
+    const AGENT_COLORS = {
+      claude: 'var(--claude)',
+      codex: 'var(--codex)',
+      agy: 'var(--agy)'
+    };
+    const AGENT_NAMES = {
+      claude: 'Claude Code',
+      codex: 'OpenAI Codex',
+      agy: 'Antigravity'
+    };
+
+    let latestData = null;
+    let chartFilter = 'all';
+    let selectedDay = null;
+    let userPickedDay = false;
+    const expandedAgents = new Set();
+
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      document.getElementById('themeLightBtn').classList.toggle('active', theme === 'light');
+      document.getElementById('themeDarkBtn').classList.toggle('active', theme === 'dark');
+    }
+
+    function initTheme() {
+      const saved = localStorage.getItem('usage_theme');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      applyTheme(saved || (prefersDark ? 'dark' : 'light'));
+    }
+
+    document.getElementById('themeLightBtn').onclick = () => {
+      localStorage.setItem('usage_theme', 'light');
+      applyTheme('light');
+    };
+    document.getElementById('themeDarkBtn').onclick = () => {
+      localStorage.setItem('usage_theme', 'dark');
+      applyTheme('dark');
+    };
+    initTheme();
+
+    document.getElementById('chartFilter').addEventListener('click', e => {
+      const btn = e.target.closest('button[data-filter]');
+      if (!btn) return;
+      chartFilter = btn.getAttribute('data-filter');
+      document.querySelectorAll('#chartFilter button').forEach(b => {
+        b.classList.toggle('active', b === btn);
+      });
+      if (latestData) renderChart(latestData);
+    });
+
+    function fmtNum(n) {
+      if (!n || n <= 0) return '0';
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return String(n);
+    }
+
+    function fmtExact(n) {
+      if (!n || n <= 0) return '0';
+      return Number(n).toLocaleString('zh-CN');
+    }
+
+    function fmtBytes(b) {
+      if (!b || b <= 0) return '0 B';
+      if (b >= 1024 * 1024 * 1024) return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+      if (b >= 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+      if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+      return b + ' B';
+    }
+
+    function fmtClock(ms) {
+      if (!ms || ms <= 0) return '--';
+      const d = new Date(ms);
+      const pad = v => String(v).padStart(2, '0');
+      const now = new Date();
+      const sameDay = d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+      if (sameDay) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+      return `${d.getMonth() + 1}/${d.getDate()}(${weekdays[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function fmtCountdown(ms) {
+      if (!ms || ms <= 0) return '';
+      const diff = ms - Date.now();
+      if (diff <= 0) return '已重置';
+      const sec = Math.floor(diff / 1000);
+      const days = Math.floor(sec / 86400);
+      const hrs = Math.floor((sec % 86400) / 3600);
+      const mins = Math.floor((sec % 3600) / 60);
+      const secs = sec % 60;
+      if (days > 0) return `剩余 ${days}天 ${hrs}h ${mins}m`;
+      if (hrs > 0) return `剩余 ${hrs}h ${mins}m ${secs}s`;
+      return `剩余 ${mins}m ${secs}s`;
+    }
+
+    function fmtRelative(ms) {
+      if (!ms || ms <= 0) return '暂无记录';
+      const diff = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+      if (diff < 60) return '刚刚活跃';
+      if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前活跃`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前活跃`;
+      return `${Math.floor(diff / 86400)} 天前活跃`;
+    }
+
+    function statusColor(pct, fallback) {
+      if (pct == null) return fallback;
+      if (pct >= 85) return 'var(--red)';
+      if (pct >= 60) return 'var(--orange)';
+      return 'var(--green)';
+    }
+
+    function esc(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function renderHero(data) {
+      const tot = data.total || {};
+      const agents = data.agents || [];
+      const grandTokens = Math.max(1, tot.total_tokens || 0);
+      const inTotal = (tot.input_tokens || 0) + (tot.cache_read_tokens || 0) + (tot.cache_write_tokens || 0);
+
+      const segsHtml = agents
+        .filter(a => (a.total && a.total.total_tokens > 0))
+        .map(a => {
+          const pct = Math.max(0.8, ((a.total.total_tokens || 0) / grandTokens) * 100);
+          const color = AGENT_COLORS[a.agent] || 'var(--accent)';
+          return `<div class="share-seg" style="width:${pct.toFixed(2)}%;background:${color}" title="${esc(a.display_name)}: ${fmtNum(a.total.total_tokens)}"></div>`;
+        }).join('');
+
+      const legendHtml = agents.map(a => {
+        const val = a.total ? a.total.total_tokens : 0;
+        const pct = tot.total_tokens > 0 ? ((val / tot.total_tokens) * 100).toFixed(1) : '0.0';
+        const color = AGENT_COLORS[a.agent] || 'var(--accent)';
+        return `
+          <span class="share-legend-item">
+            <i class="dot" style="background:${color}"></i>
+            <span>${esc(a.display_name)}</span>
+            <strong>${fmtNum(val)}</strong>
+            <span>(${pct}%)</span>
+          </span>`;
+      }).join('');
+
+      const stripItems = [
+        { label: '近 5 小时', st: data.five_hour || {} },
+        { label: '今日用量', st: data.today || {} },
+        { label: '本周（周一至今）', st: data.week || {} },
+        { label: '本月用量', st: data.month || {} },
+      ];
+
+      document.getElementById('heroCard').innerHTML = `
+        <div class="hero-top">
+          <div>
+            <div class="hero-label">历史累计总量</div>
+            <div class="hero-number-row">
+              <span class="hero-value" title="${fmtExact(tot.total_tokens)} tokens">${fmtNum(tot.total_tokens)}</span>
+              <span class="hero-unit">tokens</span>
+            </div>
+          </div>
+          <div class="hero-detail">
+            <div>输入 ${fmtNum(inTotal)} · 输出 ${fmtNum(tot.output_tokens)}</div>
+            <div>累计 ${fmtExact(tot.requests)} 次本地记录请求</div>
+          </div>
+        </div>
+        <div class="share-wrap">
+          <div class="share-bar">${segsHtml}</div>
+          <div class="share-legend">${legendHtml}</div>
+        </div>
+        <div class="kpi-strip">
+          ${stripItems.map(item => `
+            <div class="kpi-item">
+              <span class="kpi-k">${item.label}</span>
+              <span class="kpi-v" title="${fmtExact(item.st.total_tokens)} tokens">${fmtNum(item.st.total_tokens)}</span>
+              <span class="kpi-s">输出 ${fmtNum(item.st.output_tokens)} · ${fmtExact(item.st.requests)} 次</span>
+            </div>`).join('')}
+        </div>`;
+    }
+
+    function renderQuotaRow(label, w, accentColor) {
+      const hasPct = typeof w.used_percent === 'number';
+      const pct = hasPct ? Math.round(w.used_percent * 10) / 10 : null;
+      const leftPct = hasPct ? Math.max(0, Math.round((100 - w.used_percent) * 10) / 10) : null;
+      const color = statusColor(pct, accentColor);
+      const fillPct = hasPct
+        ? (w.expired ? 0 : Math.min(100, Math.max(pct, pct > 0 ? 2 : 0)))
+        : (w.tokens && w.tokens.total_tokens > 0 ? 100 : 0);
+      const rightText = w.source === 'official'
+        ? (w.expired ? '已重置 (0%)' : `已用 ${pct}% · 剩 ${leftPct}%`)
+        : `${fmtNum(w.tokens ? w.tokens.total_tokens : 0)} tok`;
+      const hasTok = w.tokens && w.tokens.total_tokens > 0;
+      const resetHtml = w.resets_at > 0
+        ? `${fmtClock(w.resets_at)} 重置 · <span data-countdown="${w.resets_at}">${fmtCountdown(w.resets_at)}</span>`
+        : (w.source === 'official' ? '配额满额可用' : (hasTok ? '仅本地消耗统计' : '当前窗口空闲'));
+      const reqHtml = w.tokens && w.tokens.requests > 0 ? `${fmtExact(w.tokens.requests)} 次` : '';
+
+      return `
+        <div class="quota-item">
+          <div class="quota-top">
+            <span class="quota-label">${label}</span>
+            <span class="quota-val" style="color:${color}">${rightText}</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width:${fillPct}%;background:${color};opacity:${hasPct ? 1 : 0.65}"></div>
+          </div>
+          <div class="quota-sub">
+            <span>${resetHtml}</span>
+            ${reqHtml ? `<span>${reqHtml}</span>` : ''}
+          </div>
+          ${w.note ? `<div class="quota-note">${esc(w.note)}</div>` : ''}
+        </div>`;
+    }
+
+    function renderAgents(data) {
+      const agents = data.agents || [];
+      document.getElementById('agentsStack').innerHTML = agents.map(a => {
+        const color = AGENT_COLORS[a.agent] || 'var(--accent)';
+        const planHtml = a.plan_type
+          ? `<span class="plan-pill" style="color:${color};background:color-mix(in srgb, ${color} 14%, transparent)">${esc(a.plan_type.toUpperCase())}</span>`
+          : '';
+
+        const allModels = a.models || [];
+        const isExpanded = expandedAgents.has(a.agent);
+        const defaultLimit = 5;
+        const visibleModels = isExpanded ? allModels : allModels.slice(0, defaultLimit);
+        const maxModelTok = Math.max(1, ...allModels.map(m => (m.total ? m.total.total_tokens : 0)));
+
+        const toggleBtn = allModels.length > defaultLimit
+          ? `<button type="button" class="text-link-btn" data-toggle-agent="${esc(a.agent)}">${isExpanded ? '收起' : `展开全部 ${allModels.length} 个`}</button>`
+          : '';
+
+        const modelsHtml = allModels.length
+          ? `
+            <div class="models-section">
+              <div class="models-bar">
+                <div class="models-bar-left">
+                  <span class="models-heading">模型用量明细</span>
+                  <span class="models-files">共 ${allModels.length} 个模型 · 日志 ${fmtExact(a.log_files)} 个 · ${fmtBytes(a.log_bytes)}</span>
+                </div>
+                ${toggleBtn}
+              </div>
+              <div class="model-list">
+                <div class="model-row head">
+                  <span class="model-name">模型</span>
+                  <span class="model-bar-cell">占比</span>
+                  <span class="model-num model-col-today">今日</span>
+                  <span class="model-num model-col-week">本周</span>
+                  <span class="model-num">本月</span>
+                  <span class="model-num total">总计</span>
+                </div>
+                ${visibleModels.map(m => {
+                  const mTot = m.total ? m.total.total_tokens : 0;
+                  const barPct = Math.max(mTot > 0 ? 3 : 0, Math.round((mTot / maxModelTok) * 100));
+                  return `
+                    <div class="model-row">
+                      <span class="model-name" title="${esc(m.model)}">${esc(m.model)}</span>
+                      <span class="model-bar-cell">
+                        <span class="mini-bar-track">
+                          <span class="mini-bar-fill" style="display:block;width:${barPct}%;background:${color}"></span>
+                        </span>
+                      </span>
+                      <span class="model-num model-col-today">${fmtNum(m.today && m.today.total_tokens)}</span>
+                      <span class="model-num model-col-week">${fmtNum(m.week && m.week.total_tokens)}</span>
+                      <span class="model-num">${fmtNum(m.month && m.month.total_tokens)}</span>
+                      <span class="model-num total" title="${fmtExact(mTot)} tokens">${fmtNum(mTot)}</span>
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>`
+          : `
+            <div class="models-section">
+              <div class="models-bar">
+                <span class="models-heading">暂无模型用量记录</span>
+                <span class="models-files">${a.installed ? '已检测到本地目录' : '未检测到本地目录'}</span>
+              </div>
+            </div>`;
+
+        const noteHtml = a.history_note
+          ? `
+            <div class="history-footnote">
+              <svg class="info-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                <circle cx="10" cy="10" r="7.5"/>
+                <path d="M10 9v4.5M10 6.5h.01" stroke-linecap="round"/>
+              </svg>
+              <span>${esc(a.history_note)}</span>
+            </div>`
+          : '';
+
+        return `
+          <article class="ios-card agent-card">
+            <div class="agent-header">
+              <div class="agent-id">
+                <span class="agent-badge-dot" style="background:${color}"></span>
+                <span class="agent-name">${esc(a.display_name)}</span>
+                ${planHtml}
+              </div>
+              <div class="agent-right-meta">
+                <span class="status-chip">${fmtRelative(a.last_active_at)}</span>
+              </div>
+            </div>
+
+            <div class="agent-body">
+              <div class="quota-group">
+                ${renderQuotaRow('5 小时滚动窗口', a.window_5h || {}, color)}
+                ${renderQuotaRow('周配额窗口', a.window_weekly || {}, color)}
+              </div>
+              <div class="stat-quad">
+                <div class="stat-tile">
+                  <span class="k">今日</span>
+                  <span class="v" title="${fmtExact(a.today && a.today.total_tokens)}">${fmtNum(a.today && a.today.total_tokens)}</span>
+                </div>
+                <div class="stat-tile">
+                  <span class="k">本周</span>
+                  <span class="v" title="${fmtExact(a.week && a.week.total_tokens)}">${fmtNum(a.week && a.week.total_tokens)}</span>
+                </div>
+                <div class="stat-tile">
+                  <span class="k">本月</span>
+                  <span class="v" title="${fmtExact(a.month && a.month.total_tokens)}">${fmtNum(a.month && a.month.total_tokens)}</span>
+                </div>
+                <div class="stat-tile emphasis">
+                  <span class="k">总计</span>
+                  <span class="v" style="color:${color}" title="${fmtExact(a.total && a.total.total_tokens)}">${fmtNum(a.total && a.total.total_tokens)}</span>
+                </div>
+              </div>
+            </div>
+
+            ${modelsHtml}
+            ${noteHtml}
+          </article>`;
+      }).join('');
+
+      document.querySelectorAll('[data-toggle-agent]').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-toggle-agent');
+          if (expandedAgents.has(id)) expandedAgents.delete(id);
+          else expandedAgents.add(id);
+          if (latestData) renderAgents(latestData);
+        };
+      });
+    }
+
+    function dayMetric(d, filter) {
+      if (filter === 'claude') return d.claude || 0;
+      if (filter === 'codex') return d.codex || 0;
+      if (filter === 'agy') return d.agy || 0;
+      return d.total || 0;
+    }
+
+    function renderChart(data) {
+      const daily = data.daily || [];
+      if (!daily.length) return;
+
+      // Default selectedDay to latest active day (or last day) if unset.
+      if (!selectedDay || !daily.some(d => d.date === selectedDay)) {
+        const active = [...daily].reverse().find(d => dayMetric(d, chartFilter) > 0);
+        selectedDay = active ? active.date : daily[daily.length - 1].date;
+      }
+
+      const vals = daily.map(d => dayMetric(d, chartFilter));
+      const maxVal = Math.max(1, ...vals);
+      const sum14 = vals.reduce((acc, v) => acc + v, 0);
+      const filterLabel = chartFilter === 'all' ? '全部 Agent' : AGENT_NAMES[chartFilter];
+      document.getElementById('chartSubtitle').textContent =
+        `${filterLabel} 近 14 天合计 ${fmtNum(sum14)} · 峰值 ${fmtNum(Math.max(0, ...vals))}`;
+
+      const maxBarPx = 136;
+      document.getElementById('dailyChart').innerHTML = daily.map(d => {
+        const val = dayMetric(d, chartFilter);
+        const hPx = val > 0 ? Math.max(6, Math.round((val / maxVal) * maxBarPx)) : 4;
+        const isSel = userPickedDay && selectedDay === d.date;
+        const isDim = userPickedDay && selectedDay && !isSel;
+        let segs = '';
+        if (val > 0) {
+          if (chartFilter === 'all') {
+            const cPct = ((d.claude || 0) / val) * 100;
+            const xPct = ((d.codex || 0) / val) * 100;
+            const aPct = ((d.agy || 0) / val) * 100;
+            if (d.claude > 0) segs += `<div class="bar-seg" style="height:${cPct}%;background:var(--claude)"></div>`;
+            if (d.codex > 0) segs += `<div class="bar-seg" style="height:${xPct}%;background:var(--codex)"></div>`;
+            if (d.agy > 0) segs += `<div class="bar-seg" style="height:${aPct}%;background:var(--agy)"></div>`;
+          } else {
+            segs = `<div class="bar-seg" style="height:100%;background:${AGENT_COLORS[chartFilter]}"></div>`;
+          }
+        }
+        return `
+          <div class="bar-col ${isSel ? 'selected' : ''} ${isDim ? 'dimmed' : ''}" data-day="${esc(d.date)}" title="${esc(d.date)} · ${fmtNum(val)}">
+            <div class="bar-val">${val > 0 ? fmtNum(val) : ''}</div>
+            <div class="bar-stack" style="height:${hPx}px">${segs}</div>
+            <div class="bar-day">${d.date.slice(5)}</div>
+          </div>`;
+      }).join('');
+
+      document.querySelectorAll('.bar-col[data-day]').forEach(el => {
+        el.onclick = () => {
+          const clicked = el.getAttribute('data-day');
+          if (userPickedDay && selectedDay === clicked) {
+            userPickedDay = false;
+          } else {
+            selectedDay = clicked;
+            userPickedDay = true;
+          }
+          renderChart(data);
+        };
+      });
+
+      const cur = daily.find(d => d.date === selectedDay) || daily[daily.length - 1];
+      document.getElementById('dayInspector').innerHTML = `
+        <span class="day-inspector-date">${esc(cur.date)} · 当日合计 ${fmtNum(cur.total)}</span>
+        <div class="day-inspector-items">
+          <span><i class="dot" style="background:var(--claude)"></i>Claude <strong>${fmtNum(cur.claude)}</strong></span>
+          <span><i class="dot" style="background:var(--codex)"></i>Codex <strong>${fmtNum(cur.codex)}</strong></span>
+          <span><i class="dot" style="background:var(--agy)"></i>Antigravity <strong>${fmtNum(cur.agy)}</strong></span>
+        </div>`;
+    }
+
+    function render(data) {
+      latestData = data;
+      const m = data.meta || {};
+      document.getElementById('hostLabel').textContent = data.hostname || 'Mac';
+      document.getElementById('scanMeta').textContent =
+        `增量扫描 ${m.scan_ms ?? 0} ms · 命中缓存 ${m.files_cached ?? 0}/${m.files_total ?? 0}`;
+      document.getElementById('updatedMeta').textContent = `更新于 ${fmtClock(data.generated_at)}`;
+      document.getElementById('pageFooter').textContent =
+        `持久化聚合缓存 ${fmtBytes(m.cache_bytes || 0)}（原始日志轮转清理后历史仍保留） · 每 60 秒自动刷新 · 倒计时本地每秒更新`;
+
+      renderHero(data);
+      renderAgents(data);
+      renderChart(data);
+    }
+
+    async function load(force = false) {
+      const btn = document.getElementById('refreshBtn');
+      const lbl = document.getElementById('refreshLabel');
+      const errBox = document.getElementById('errBox');
+      btn.disabled = true;
+      btn.classList.add('spinning');
+      lbl.textContent = force ? '扫描中' : '刷新中';
+      try {
+        const res = await fetch('/api/usage' + (force ? '?force=1' : ''), { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        errBox.style.display = 'none';
+        render(data);
+      } catch (err) {
+        errBox.textContent = '拉取用量失败：' + err.message;
+        errBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('spinning');
+        lbl.textContent = '刷新';
+      }
+    }
+
+    document.getElementById('refreshBtn').onclick = () => load(true);
+    setInterval(() => {
+      document.querySelectorAll('[data-countdown]').forEach(el => {
+        const ms = Number(el.getAttribute('data-countdown'));
+        el.textContent = fmtCountdown(ms);
+      });
+    }, 1000);
+    setInterval(() => load(false), 60000);
+    load(false);
+  </script>
+</body>
+</html>

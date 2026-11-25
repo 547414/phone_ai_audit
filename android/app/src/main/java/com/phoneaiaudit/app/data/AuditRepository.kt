@@ -75,6 +75,9 @@ object AuditRepository {
     private val _pendingFileOpen = MutableStateFlow<FileOpenRequest?>(null)
     val pendingFileOpen: StateFlow<FileOpenRequest?> = _pendingFileOpen.asStateFlow()
 
+    private val _usageSummary = MutableStateFlow<UsageSummary?>(null)
+    val usageSummary: StateFlow<UsageSummary?> = _usageSummary.asStateFlow()
+
     fun setTerminalActive(active: Boolean) {
         _isTerminalActive.value = active
     }
@@ -743,6 +746,21 @@ object AuditRepository {
                     arr.optJSONObject(i)?.let { out.add(GitLogEntry.fromJson(it)) }
                 }
                 out
+            }
+        }
+    }
+
+    suspend fun fetchUsage(force: Boolean = false): Result<UsageSummary> = withContext(Dispatchers.IO) {
+        if (!config.isConfigured()) return@withContext Result.failure(IllegalStateException("未配置服务器"))
+        runCatching {
+            val url = if (force) "/api/v1/usage?force=1" else "/api/v1/usage"
+            val req = authedRequest(url).get().build()
+            longHttpClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error(parseErrorMsg(resp.code, body))
+                val summary = UsageSummary.fromJson(JSONObject(body))
+                _usageSummary.value = summary
+                summary
             }
         }
     }

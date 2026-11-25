@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,11 +20,12 @@ import (
 	"phone-ai-audit/mac-agent/internal/idle"
 	"phone-ai-audit/mac-agent/internal/proto"
 	"phone-ai-audit/mac-agent/internal/term"
+	"phone-ai-audit/mac-agent/internal/usage"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
+		printHelp()
 		return
 	}
 	cfg, err := config.Load()
@@ -61,18 +63,24 @@ func main() {
 		patchSettings(cfg, map[string]any{"files_enabled": os.Args[2] == "on"})
 	case "pair":
 		cmdPair(cfg)
+	case "usage":
+		cmdUsage(cfg)
+	case "web":
+		cmdWeb(cfg)
 	case "test-msg":
 		cmdTestMessage(cfg)
 	case "test-approve":
 		cmdTestApproval(cfg)
 	default:
-		usage()
+		printHelp()
 	}
 }
 
-func usage() {
+func printHelp() {
 	fmt.Println(`Phone AI Audit Mac 控制命令:
   ai-audit status                         查看中转状态、手机在线数、当前模式、tmux 会话
+  ai-audit usage                          查看 Claude / Codex / Antigravity 用量与配额重置时间
+  ai-audit web                            在浏览器打开本机 Agent 用量看板网页
   ai-audit mode auto|both|phone|notify    切换审批模式 (智能离座 / 双端同步 / 始终手机 / 仅通知)
   ai-audit awake on|off                   开启/关闭 Mac 防休眠 (caffeinate)
   ai-audit terminal on|off                开启/关闭远程交互终端总开关
@@ -156,6 +164,104 @@ func cmdPair(cfg config.Config) {
 	fmt.Println(qr.ToSmallString(false))
 	fmt.Printf("服务器地址: %s\n", cfg.ServerURL)
 	fmt.Printf("App Token:  %s\n", cfg.AppToken)
+}
+
+func cmdWeb(cfg config.Config) {
+	url := cfg.WebURL()
+	if url == "" {
+		fmt.Fprintln(os.Stderr, "用量网页看板已关闭（可在 config.json 设置 web_addr，如 \"127.0.0.1:9878\"）")
+		os.Exit(1)
+	}
+	fmt.Printf("打开 Agent 用量看板: %s\n", url)
+	_ = exec.Command("open", url).Start()
+}
+
+func cmdUsage(cfg config.Config) {
+	var sum usage.Summary
+	fetched := false
+	unixCli := &http.Client{
+		Timeout: 20 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "unix", cfg.SocketPath)
+			},
+		},
+	}
+	if resp, err := unixCli.Get("http://unix/local/usage"); err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&sum) == nil {
+			fetched = true
+		}
+	}
+	if !fetched {
+		eng := usage.New(usage.Options{Hostname: cfg.Hostname, WebURL: cfg.WebURL(), ProxyURL: cfg.ProxyURL})
+		s, err := eng.Snapshot(context.Background(), true)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "统计用量失败: %v\n", err)
+			os.Exit(1)
+		}
+		sum = s
+	}
+
+	fmt.Printf("Agent 用量概览 (%s) | 增量扫描 %dms (缓存 %d/%d)\n",
+		sum.Hostname, sum.Meta.ScanMs, sum.Meta.FilesCached, sum.Meta.FilesTotal)
+	if sum.WebURL != "" {
+		fmt.Printf("网页看板: %s\n", sum.WebURL)
+	}
+	fmt.Printf("合计: 今日 %s | 5h %s | 本周 %s | 本月 %s | 总计 %s\n\n",
+		fmtTok(sum.Today.TotalTokens), fmtTok(sum.FiveHour.TotalTokens),
+		fmtTok(sum.Week.TotalTokens), fmtTok(sum.Month.TotalTokens), fmtTok(sum.Total.TotalTokens))
+	for _, a := range sum.Agents {
+		plan := ""
+		if a.PlanType != "" {
+			plan = " [" + strings.ToUpper(a.PlanType) + "]"
+		}
+		fmt.Printf("%-14s%s  今日 %-8s  本周 %-8s  本月 %-8s  总计 %-8s\n",
+			a.DisplayName, plan,
+			fmtTok(a.Today.TotalTokens), fmtTok(a.Week.TotalTokens),
+			fmtTok(a.Month.TotalTokens), fmtTok(a.Total.TotalTokens))
+		fmt.Printf("  5h 窗口: %-18s  周窗口: %s\n",
+			fmtWindowBrief(a.Window5h), fmtWindowBrief(a.WindowWeekly))
+		if a.HistoryNote != "" {
+			fmt.Printf("  说明: %s\n", a.HistoryNote)
+		}
+	}
+}
+
+func fmtTok(n int64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", float64(n)/1e9)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.2fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+func fmtWindowBrief(w usage.QuotaWindow) string {
+	val := fmtTok(w.Tokens.TotalTokens)
+	if w.UsedPercent != nil {
+		if w.Expired {
+			val = "已重置(0%)"
+		} else {
+			left := 100.0 - *w.UsedPercent
+			if left < 0 {
+				left = 0
+			}
+			val = fmt.Sprintf("已用 %.0f%%/剩 %.0f%%", *w.UsedPercent, left)
+		}
+	}
+	if w.ResetsAt <= 0 {
+		if w.Source == "local" && w.Tokens.TotalTokens > 0 {
+			return val + " (本地统计)"
+		}
+		return val + " (空闲)"
+	}
+	t := time.UnixMilli(w.ResetsAt).In(time.Local)
+	return fmt.Sprintf("%s (重置 %s)", val, t.Format("01-02 15:04"))
 }
 
 func cmdTestMessage(cfg config.Config) {

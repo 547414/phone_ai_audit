@@ -1,6 +1,6 @@
 module phone-ai-audit/mac-agent
 
-go 1.24
+go 1.25
 
 require (
 	github.com/creack/pty v1.1.24
@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/klauspost/compress v1.20.5 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/richardlehane/mscfb v1.0.4 // indirect
 	github.com/richardlehane/msoleps v1.0.4 // indirect

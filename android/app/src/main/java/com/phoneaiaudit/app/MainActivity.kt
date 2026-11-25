@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
@@ -44,6 +45,7 @@ import com.phoneaiaudit.app.ui.IosTabItem
 import com.phoneaiaudit.app.ui.MessagesScreen
 import com.phoneaiaudit.app.ui.ProvideIosPalette
 import com.phoneaiaudit.app.ui.TerminalScreen
+import com.phoneaiaudit.app.ui.UsageScreen
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.CoroutineScope
@@ -85,7 +87,7 @@ class MainActivity : AppCompatActivity() {
         if (AuditRepository.config.isConfigured()) {
             AuditForegroundService.start(this)
         } else {
-            AuditRepository.selectTab(3)
+            AuditRepository.selectTab(4)
         }
 
         setContent {
@@ -146,7 +148,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val tab = intent.getIntExtra("open_tab", -1)
-        if (tab in 0..3) {
+        if (tab in 0..4) {
             AuditRepository.selectTab(tab)
         }
     }
@@ -191,6 +193,7 @@ class MainActivity : AppCompatActivity() {
                 IosTabItem("消息", Icons.Default.Notifications, inboxBadge),
                 IosTabItem("终端", Icons.Default.Terminal),
                 IosTabItem("文件", Icons.Default.Folder),
+                IosTabItem("用量", Icons.Default.BarChart),
                 IosTabItem("控制", Icons.Default.Settings)
             )
         }
@@ -202,7 +205,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isTerminalActive && !isFileOverlayActive) {
                     IosBottomBar(
                         items = tabs,
-                        selectedIndex = selectedTab.coerceIn(0, 3),
+                        selectedIndex = selectedTab.coerceIn(0, 4),
                         onSelect = { AuditRepository.selectTab(it) }
                     )
                 }
@@ -217,6 +220,7 @@ class MainActivity : AppCompatActivity() {
                     0 -> MessagesScreen(activity = this@MainActivity, onShowSnack = showSnack)
                     1 -> TerminalScreen(activity = this@MainActivity, onShowSnack = showSnack)
                     2 -> FilesScreen(activity = this@MainActivity, onShowSnack = showSnack)
+                    3 -> UsageScreen(onShowSnack = showSnack)
                     else -> ControlScreen(onScanQr = ::startQrScan, onShowSnack = showSnack)
                 }
             }

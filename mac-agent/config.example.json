@@ -4,6 +4,8 @@
   "app_token": "replace-with-strong-random-app-token",
   "socket_path": "~/.local/run/ai-audit.sock",
   "hostname": "my-mac",
+  "web_addr": "127.0.0.1:9878",
+  "proxy_url": "",
   "file_roots": [
     "~/workspace"
   ]

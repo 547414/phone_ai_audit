@@ -101,6 +101,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/git/discard", s.requireApp(s.handleGitDiscard))
 	s.mux.HandleFunc("GET /api/v1/git/log", s.requireApp(s.handleGitLog))
 
+	// Agent Usage & Quotas (RPC to Mac daemon)
+	s.mux.HandleFunc("GET /api/v1/usage", s.requireAny(s.handleUsage))
+
 	// WebSockets
 	s.mux.HandleFunc("GET /api/v1/ws/mac", s.requireMac(s.handleMacWS))
 	s.mux.HandleFunc("GET /api/v1/ws/app", s.requireApp(s.handleAppWS))
@@ -707,6 +710,14 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 	s.writeRPC(w, s.hub.CallMacRPC(r.Context(), "git.log", map[string]any{
 		"path":  q.Get("path"),
 		"limit": limit,
+	}))
+}
+
+func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("force")
+	force := q == "1" || strings.EqualFold(q, "true")
+	s.writeRPC(w, s.hub.CallMacRPC(r.Context(), "usage.summary", map[string]any{
+		"force": force,
 	}))
 }
 

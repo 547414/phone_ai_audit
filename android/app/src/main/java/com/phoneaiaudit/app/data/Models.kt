@@ -646,3 +646,221 @@ fun formatFileSize(bytes: Long): String {
     if (mb < 1024) return String.format("%.1f MB", mb)
     return String.format("%.2f GB", mb / 1024.0)
 }
+
+// --- Agent Usage & Quota Telemetry Models ---
+
+data class UsageTokenStats(
+    val inputTokens: Long = 0L,
+    val cacheReadTokens: Long = 0L,
+    val cacheWriteTokens: Long = 0L,
+    val outputTokens: Long = 0L,
+    val totalTokens: Long = 0L,
+    val requests: Long = 0L
+) {
+    companion object {
+        fun fromJson(o: JSONObject?): UsageTokenStats {
+            if (o == null) return UsageTokenStats()
+            return UsageTokenStats(
+                inputTokens = o.optLong("input_tokens", 0L),
+                cacheReadTokens = o.optLong("cache_read_tokens", 0L),
+                cacheWriteTokens = o.optLong("cache_write_tokens", 0L),
+                outputTokens = o.optLong("output_tokens", 0L),
+                totalTokens = o.optLong("total_tokens", 0L),
+                requests = o.optLong("requests", 0L)
+            )
+        }
+    }
+}
+
+data class UsageQuotaWindow(
+    val source: String = "local",
+    val usedPercent: Double? = null,
+    val resetsAt: Long = 0L,
+    val windowMinutes: Int = 300,
+    val tokens: UsageTokenStats = UsageTokenStats(),
+    val expired: Boolean = false,
+    val observedAt: Long = 0L,
+    val note: String = ""
+) {
+    companion object {
+        fun fromJson(o: JSONObject?): UsageQuotaWindow {
+            if (o == null) return UsageQuotaWindow()
+            val pct = if (o.has("used_percent") && !o.isNull("used_percent")) {
+                o.optDouble("used_percent", Double.NaN).takeUnless { it.isNaN() }
+            } else {
+                null
+            }
+            return UsageQuotaWindow(
+                source = o.optString("source", "local"),
+                usedPercent = pct,
+                resetsAt = o.optLong("resets_at", 0L),
+                windowMinutes = o.optInt("window_minutes", 300),
+                tokens = UsageTokenStats.fromJson(o.optJSONObject("tokens")),
+                expired = o.optBoolean("expired", false),
+                observedAt = o.optLong("observed_at", 0L),
+                note = o.optString("note", "")
+            )
+        }
+    }
+}
+
+data class UsageModelItem(
+    val model: String,
+    val today: UsageTokenStats,
+    val week: UsageTokenStats,
+    val month: UsageTokenStats,
+    val total: UsageTokenStats
+) {
+    companion object {
+        fun fromJson(o: JSONObject): UsageModelItem = UsageModelItem(
+            model = o.optString("model"),
+            today = UsageTokenStats.fromJson(o.optJSONObject("today")),
+            week = UsageTokenStats.fromJson(o.optJSONObject("week")),
+            month = UsageTokenStats.fromJson(o.optJSONObject("month")),
+            total = UsageTokenStats.fromJson(o.optJSONObject("total"))
+        )
+    }
+}
+
+data class UsageAgentItem(
+    val agent: String,
+    val displayName: String,
+    val planType: String = "",
+    val installed: Boolean = false,
+    val logFiles: Int = 0,
+    val logBytes: Long = 0L,
+    val lastActiveAt: Long = 0L,
+    val historyNote: String = "",
+    val today: UsageTokenStats = UsageTokenStats(),
+    val fiveHour: UsageTokenStats = UsageTokenStats(),
+    val week: UsageTokenStats = UsageTokenStats(),
+    val month: UsageTokenStats = UsageTokenStats(),
+    val total: UsageTokenStats = UsageTokenStats(),
+    val window5h: UsageQuotaWindow = UsageQuotaWindow(),
+    val windowWeekly: UsageQuotaWindow = UsageQuotaWindow(),
+    val models: List<UsageModelItem> = emptyList()
+) {
+    companion object {
+        fun fromJson(o: JSONObject): UsageAgentItem {
+            val models = mutableListOf<UsageModelItem>()
+            val arr = o.optJSONArray("models")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.let { models.add(UsageModelItem.fromJson(it)) }
+                }
+            }
+            return UsageAgentItem(
+                agent = o.optString("agent"),
+                displayName = o.optString("display_name", agentDisplayName(o.optString("agent"))),
+                planType = o.optString("plan_type"),
+                installed = o.optBoolean("installed", false),
+                logFiles = o.optInt("log_files", 0),
+                logBytes = o.optLong("log_bytes", 0L),
+                lastActiveAt = o.optLong("last_active_at", 0L),
+                historyNote = o.optString("history_note"),
+                today = UsageTokenStats.fromJson(o.optJSONObject("today")),
+                fiveHour = UsageTokenStats.fromJson(o.optJSONObject("five_hour")),
+                week = UsageTokenStats.fromJson(o.optJSONObject("week")),
+                month = UsageTokenStats.fromJson(o.optJSONObject("month")),
+                total = UsageTokenStats.fromJson(o.optJSONObject("total")),
+                window5h = UsageQuotaWindow.fromJson(o.optJSONObject("window_5h")),
+                windowWeekly = UsageQuotaWindow.fromJson(o.optJSONObject("window_weekly")),
+                models = models
+            )
+        }
+    }
+}
+
+data class UsageDailyPoint(
+    val date: String,
+    val total: Long,
+    val claude: Long,
+    val codex: Long,
+    val agy: Long
+) {
+    companion object {
+        fun fromJson(o: JSONObject): UsageDailyPoint = UsageDailyPoint(
+            date = o.optString("date"),
+            total = o.optLong("total", 0L),
+            claude = o.optLong("claude", 0L),
+            codex = o.optLong("codex", 0L),
+            agy = o.optLong("agy", 0L)
+        )
+    }
+}
+
+data class UsageScanMeta(
+    val scanMs: Long = 0L,
+    val filesTotal: Int = 0,
+    val filesScanned: Int = 0,
+    val filesCached: Int = 0,
+    val cacheBytes: Long = 0L
+) {
+    companion object {
+        fun fromJson(o: JSONObject?): UsageScanMeta {
+            if (o == null) return UsageScanMeta()
+            return UsageScanMeta(
+                scanMs = o.optLong("scan_ms", 0L),
+                filesTotal = o.optInt("files_total", 0),
+                filesScanned = o.optInt("files_scanned", 0),
+                filesCached = o.optInt("files_cached", 0),
+                cacheBytes = o.optLong("cache_bytes", 0L)
+            )
+        }
+    }
+}
+
+data class UsageSummary(
+    val generatedAt: Long = 0L,
+    val timezone: String = "",
+    val hostname: String = "",
+    val webUrl: String = "",
+    val today: UsageTokenStats = UsageTokenStats(),
+    val fiveHour: UsageTokenStats = UsageTokenStats(),
+    val week: UsageTokenStats = UsageTokenStats(),
+    val month: UsageTokenStats = UsageTokenStats(),
+    val total: UsageTokenStats = UsageTokenStats(),
+    val agents: List<UsageAgentItem> = emptyList(),
+    val daily: List<UsageDailyPoint> = emptyList(),
+    val meta: UsageScanMeta = UsageScanMeta()
+) {
+    companion object {
+        fun fromJson(o: JSONObject): UsageSummary {
+            val agents = mutableListOf<UsageAgentItem>()
+            val aArr = o.optJSONArray("agents")
+            if (aArr != null) {
+                for (i in 0 until aArr.length()) {
+                    aArr.optJSONObject(i)?.let { agents.add(UsageAgentItem.fromJson(it)) }
+                }
+            }
+            val daily = mutableListOf<UsageDailyPoint>()
+            val dArr = o.optJSONArray("daily")
+            if (dArr != null) {
+                for (i in 0 until dArr.length()) {
+                    dArr.optJSONObject(i)?.let { daily.add(UsageDailyPoint.fromJson(it)) }
+                }
+            }
+            return UsageSummary(
+                generatedAt = o.optLong("generated_at", 0L),
+                timezone = o.optString("timezone"),
+                hostname = o.optString("hostname"),
+                webUrl = o.optString("web_url"),
+                today = UsageTokenStats.fromJson(o.optJSONObject("today")),
+                fiveHour = UsageTokenStats.fromJson(o.optJSONObject("five_hour")),
+                week = UsageTokenStats.fromJson(o.optJSONObject("week")),
+                month = UsageTokenStats.fromJson(o.optJSONObject("month")),
+                total = UsageTokenStats.fromJson(o.optJSONObject("total")),
+                agents = agents,
+                daily = daily,
+                meta = UsageScanMeta.fromJson(o.optJSONObject("meta"))
+            )
+        }
+    }
+}
+
+fun formatTokenCount(n: Long): String = when {
+    n >= 1_000_000_000L -> String.format("%.2fB", n / 1_000_000_000.0)
+    n >= 1_000_000L -> String.format("%.2fM", n / 1_000_000.0)
+    n >= 1_000L -> String.format("%.1fK", n / 1_000.0)
+    else -> n.toString()
+}

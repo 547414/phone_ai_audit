@@ -15,7 +15,11 @@ type Config struct {
 	SocketPath string   `json:"socket_path"`
 	Hostname   string   `json:"hostname,omitempty"`
 	FileRoots  []string `json:"file_roots,omitempty"`
+	WebAddr    string   `json:"web_addr,omitempty"`
+	ProxyURL   string   `json:"proxy_url,omitempty"`
 }
+
+const DefaultWebAddr = "127.0.0.1:9878"
 
 func DefaultPath() string {
 	home, _ := os.UserHomeDir()
@@ -77,7 +81,37 @@ func Load() (Config, error) {
 		home, _ := os.UserHomeDir()
 		cfg.FileRoots = []string{home}
 	}
+	if envWeb := strings.TrimSpace(os.Getenv("AI_AUDIT_WEB_ADDR")); envWeb != "" {
+		cfg.WebAddr = envWeb
+	}
+	cfg.WebAddr = strings.TrimSpace(cfg.WebAddr)
+	if cfg.WebAddr == "" {
+		cfg.WebAddr = DefaultWebAddr
+	}
+	if envProxy := strings.TrimSpace(os.Getenv("AI_AUDIT_PROXY_URL")); envProxy != "" {
+		cfg.ProxyURL = envProxy
+	}
+	cfg.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
 	return cfg, nil
+}
+
+func (c Config) WebEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(c.WebAddr))
+	return v != "" && v != "off" && v != "none" && v != "disabled"
+}
+
+func (c Config) WebURL() string {
+	if !c.WebEnabled() {
+		return ""
+	}
+	addr := strings.TrimSpace(c.WebAddr)
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return addr
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "http://127.0.0.1" + addr
+	}
+	return "http://" + addr
 }
 
 func Save(cfg Config) error {

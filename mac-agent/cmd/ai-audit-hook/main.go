@@ -17,6 +17,7 @@ import (
 	"phone-ai-audit/mac-agent/internal/adapters"
 	"phone-ai-audit/mac-agent/internal/config"
 	"phone-ai-audit/mac-agent/internal/proto"
+	"phone-ai-audit/mac-agent/internal/usage"
 )
 
 func main() {
@@ -32,6 +33,14 @@ func main() {
 	} else if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
 		b, _ := io.ReadAll(io.LimitReader(os.Stdin, 2*1024*1024))
 		rawPayload = string(b)
+	}
+
+	// Fast-path: Antigravity official statusLine stdin JSON quota capture (silent stdout, <3ms).
+	if strings.EqualFold(agent, "agy") && strings.EqualFold(event, "StatusLine") {
+		if rawPayload != "" {
+			_ = usage.RecordAgyStatusLine([]byte(rawPayload), usage.DefaultAgyQuotaPath())
+		}
+		return
 	}
 
 	parsed := adapters.Parse(agent, event, rawPayload)

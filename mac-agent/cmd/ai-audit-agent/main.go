@@ -27,6 +27,7 @@ import (
 	"phone-ai-audit/mac-agent/internal/prompt"
 	"phone-ai-audit/mac-agent/internal/proto"
 	"phone-ai-audit/mac-agent/internal/term"
+	"phone-ai-audit/mac-agent/internal/usage"
 )
 
 const (
@@ -42,10 +43,11 @@ type wsOut struct {
 }
 
 type Daemon struct {
-	cfg     config.Config
-	awake   *awake.Controller
-	termMgr *term.Manager
-	fsMgr   *fsengine.Engine
+	cfg      config.Config
+	awake    *awake.Controller
+	termMgr  *term.Manager
+	fsMgr    *fsengine.Engine
+	usageMgr *usage.Engine
 
 	mu       sync.Mutex
 	wsConn   *websocket.Conn
@@ -63,6 +65,11 @@ func newDaemon(cfg config.Config) *Daemon {
 		cfg:   cfg,
 		awake: awake.New(),
 		fsMgr: fsengine.New(cfg.FileRoots),
+		usageMgr: usage.New(usage.Options{
+			Hostname: cfg.Hostname,
+			WebURL:   cfg.WebURL(),
+			ProxyURL: cfg.ProxyURL,
+		}),
 		settings: proto.Settings{
 			ApprovalMode:       "auto",
 			IdleThresholdSec:   60,
@@ -407,7 +414,7 @@ func (d *Daemon) handleRelayText(ctx context.Context, data []byte) {
 }
 
 func (d *Daemon) handleRPC(ctx context.Context, reqID, op string, rawParams json.RawMessage) {
-	status, data, errMsg := d.dispatchRPC(op, rawParams)
+	status, data, errMsg := d.dispatchRPC(ctx, op, rawParams)
 	resp := map[string]any{
 		"type":   "rpc.resp",
 		"req_id": reqID,
@@ -439,8 +446,19 @@ func errToRPCStatus(err error) (int, any, string) {
 	return http.StatusBadRequest, nil, err.Error()
 }
 
-func (d *Daemon) dispatchRPC(op string, rawParams json.RawMessage) (int, any, string) {
+func (d *Daemon) dispatchRPC(ctx context.Context, op string, rawParams json.RawMessage) (int, any, string) {
 	switch op {
+	case "usage.summary":
+		var p struct {
+			Force bool `json:"force"`
+		}
+		_ = json.Unmarshal(rawParams, &p)
+		sum, err := d.usageMgr.Snapshot(ctx, p.Force)
+		if err != nil {
+			return http.StatusInternalServerError, nil, err.Error()
+		}
+		return http.StatusOK, sum, ""
+
 	case "fs.roots":
 		return http.StatusOK, map[string]any{
 			"roots":   d.fsMgr.Roots(),
@@ -842,7 +860,18 @@ func (d *Daemon) serveLocalIPC(ctx context.Context) error {
 			"settings":         st,
 			"file_roots":       d.fsMgr.Roots(),
 			"tmux_sessions":    term.ListTmuxSessions(),
+			"web_url":          d.cfg.WebURL(),
 		})
+	})
+
+	mux.HandleFunc("GET /local/usage", func(w http.ResponseWriter, r *http.Request) {
+		force := r.URL.Query().Get("force") == "1"
+		sum, err := d.usageMgr.Snapshot(r.Context(), force)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeLocalJSON(w, sum)
 	})
 
 	mux.HandleFunc("POST /local/message", func(w http.ResponseWriter, r *http.Request) {
@@ -1039,6 +1068,29 @@ func writeLocalJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func (d *Daemon) serveWebDashboard(ctx context.Context) {
+	if !d.cfg.WebEnabled() {
+		return
+	}
+	ln, err := net.Listen("tcp", d.cfg.WebAddr)
+	if err != nil {
+		log.Printf("usage web dashboard listen %s failed: %v", d.cfg.WebAddr, err)
+		return
+	}
+	srv := &http.Server{
+		Handler:           d.usageMgr.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		_ = srv.Close()
+	}()
+	log.Printf("usage web dashboard listening on %s", d.cfg.WebURL())
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+		log.Printf("usage web dashboard stopped: %v", err)
+	}
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -1048,6 +1100,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	d.usageMgr.StartBackground(ctx)
+	go d.serveWebDashboard(ctx)
 	go d.runTunnel(ctx)
 	if err := d.serveLocalIPC(ctx); err != nil {
 		log.Fatalf("local IPC error: %v", err)
