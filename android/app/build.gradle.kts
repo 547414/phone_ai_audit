@@ -36,8 +36,11 @@ fun loadRootConfigEnv(): Map<String, String> {
 val rootConfigEnv = loadRootConfigEnv()
 
 fun cfgValue(key: String, default: String = ""): String {
-    val fromEnv = System.getenv(key)?.trim()
-    if (!fromEnv.isNullOrEmpty()) return fromEnv
+    val env = System.getenv()
+    if (env.containsKey(key)) {
+        val fromEnv = env[key]?.trim().orEmpty()
+        return if (fromEnv.isEmpty() && default.isNotEmpty()) default else fromEnv
+    }
     val fromFile = rootConfigEnv[key]?.trim()
     if (!fromFile.isNullOrEmpty()) return fromFile
     return default

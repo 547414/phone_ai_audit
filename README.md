@@ -339,3 +339,10 @@ Codex 对自定义 `hooks.json` 有首次信任校验。安装完成后打开一
 ```bash
 ./mac-agent/scripts/rollback.sh
 ```
+
+---
+
+## License
+
+本项目基于 [MIT License](LICENSE) 开源。
+
