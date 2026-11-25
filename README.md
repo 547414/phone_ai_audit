@@ -1,162 +1,171 @@
 # Phone AI Audit
 
 <p align="center">
-  <img src="docs/assets/vibe-hero.webp" alt="Phone AI Audit — Vibe Coding Anywhere" width="840" /><br />
-  <sub>海边吊床喝椰子水，手机一点「ALLOW ✓」，远端 Mac 上的 AI 继续全速敲代码</sub>
+  <strong>🔥 爆款都市程序员爽剧 · 全 5 集热播中 🔥</strong><br />
+  <h3>《人不在工位，我靠手机遥控 AI 一键上线》</h3>
 </p>
 
-一套面向个人开发工作流的移动端 AI 通知、远程审批、实时交互终端与远程文件 / Git 工作台系统：
+<p align="center">
+  <img src="docs/assets/vibe-hero-drama.webp" alt="红果短剧动图：老板查岗，我人不在工位但需求全上线了" width="840" /><br />
+  <sub>【第 1 集名场面 · 动图连播】老板查岗怒吼「人呢？！」，主角在海边喝着椰子水手机一点「允许 ✓」，工位 Mac 上的 AI 三秒写完自动部署，老板当场瞳孔地震！</sub>
+</p>
 
-- **统一接管多 AI 助手**：支持 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)** 的任务完成 / 异常 / 等待回答 / 权限审批消息；
-- **多模式远程审批**：支持手机通知栏直接点 **允许 / 拒绝（内联输入理由）/ 退回电脑**，并提供 **双端同步 (`both`)** 模式（Mac 屏幕右上角原生悬浮窗与手机通知栏同时弹出，先点为准、另一端自动消失），高危操作支持生物识别二次确认；
-- **加密反向隧道实时终端**：内置 `xterm.js` + `tmux` 联动终端，无需暴露 Mac SSH 22 端口，支持随时接入正在运行的 AI 终端或在手机端一键新建 Mac 终端（电脑端自动同步弹出窗口），配可拖动悬浮方向键 / 快捷键手柄与独立中文提示词输入框；
-- **远程免下载文件浏览 & Git 工作台**：按需流式传输、不落盘，支持文件名与 `rg` 全文搜索、代码语法高亮预览、在线编辑（保存前 Diff + SHA256 乐观锁防覆盖）、Markdown / 图片 / PDF / Excel / Word / PPT / 音视频预览，以及 Git Diff / 批量精准 Commit / 安全 Push。
+> **「什么？！他人都去海边度假了，这三万行需求怎么全上线了？！」**
+>
+> 别人苦守工位熬到凌晨三点给 AI 点确认，你却在海边躺吊床、地铁扶吊环、被窝撸大橘——手机轻轻一点，远端 Mac 上的 **Claude Code / OpenAI Codex / Antigravity** 瞬间满血开工，审批、终端、看代码、Diff、Commit、Push 一条龙全包！
+
+### 🎬 领衔主演 · 四大逆天金手指
+
+- **👑 三大 AI 统统归你差遣**：全面接管 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)**，任务完成、突发报错、等待回答、高危权限审批，第一时间秒推到你手里；
+- **⚡ 通知栏一键生杀大权（支持双端同步）**：锁屏下拉直接点 **允许 / 拒绝（顺手回一句理由）/ 退回电脑**；开启 **双端同步 (`both`)** 模式后，Mac 右上角原生悬浮窗与手机通知栏同步弹起，**哪边先点以哪边为准，另一端秒消失**，删库跑路等高危命令自带指纹/面容二次门禁；
+- **🕶️ 加密暗道直连 Mac 终端**：内置 `xterm.js` + `tmux` 反向隧道，**无需暴露 Mac SSH 22 端口**，随时切进正在干活的 AI 终端，还能手机一键拉起新终端（Mac 端同步弹出窗口），自带可拖动方向键/快捷键手柄 + 独立中文提示词输入条；
+- **📂 免下载远程翻代码 & 一键 Push**：按需流式传输不落盘，支持文件名与 `rg` 全文秒搜、代码语法高亮预览、在线改代码（保存前强制 Diff + SHA256 乐观锁防误覆盖）、Markdown / 图片 / PDF / Office / 音视频直看，更有移动端 **Git 工作台**（红绿 Diff、精准勾选批量 Commit、安全 Push）。
 
 ---
 
-## 随时随地 Vibe Coding
+## 🔥 红果热播榜 · 随时随地 Vibe Coding
 
-> 电脑交给 AI 疯狂写代码，审批、看 Diff、Commit & Push 交给手机——人在哪儿，工位就在哪儿。
+> **「电脑交给 AI 疯狂写码，生杀大权握在手机——人在哪儿，工位就在哪儿！」**
 
 <table>
   <tr>
     <td align="center" width="33%">
-      <img src="docs/assets/vibe-toilet.webp" alt="带薪蹲坑远程审批" width="260" /><br />
-      <strong>带薪蹲坑审批</strong><br />
-      <sub>手机一点「ALLOW ✓」，工位 AI 继续疯狂敲代码，灵感和进度两不误</sub>
+      <img src="docs/assets/vibe-toilet.webp" alt="爆款爽剧：带薪蹲坑，遥控AI狂写代码" width="250" /><br />
+      <strong>🔥 第 1 集《带薪蹲坑，遥控 AI 狂写代码》</strong><br />
+      <sub>锁屏弹出权限请求？微微一笑点下「允许 ✓」，工位 Mac 继续狂飙，灵感与进度双丰收</sub>
     </td>
     <td align="center" width="33%">
-      <img src="docs/assets/vibe-commute.webp" alt="早高峰地铁单手 Vibe Coding" width="260" /><br />
-      <strong>早高峰地铁发版</strong><br />
-      <sub>全车厢都在补觉，只有你戴着耳机单手扶吊环，优雅点下「APPROVE ✓」</sub>
+      <img src="docs/assets/vibe-commute.webp" alt="热播榜一：早高峰地铁，单手优雅发新版" width="250" /><br />
+      <strong>🚇 第 2 集《早高峰地铁，单手优雅发新版》</strong><br />
+      <sub>全车厢打工人昏昏欲睡，唯独你戴上耳机单手扶吊环，嘴角微扬点下「批准上线 ✓」</sub>
     </td>
     <td align="center" width="33%">
-      <img src="docs/assets/vibe-couch.webp" alt="被窝撸猫顺手 Push" width="260" /><br />
-      <strong>被窝撸猫顺手 Push</strong><br />
-      <sub>裹紧毯子喝口奶茶，里屋 AI 刚飙出 <code>+999 -12</code>，手机一键「PUSH ↑」</sub>
+      <img src="docs/assets/vibe-couch.webp" alt="都市逆袭：被窝撸猫，AI干完一千行" width="250" /><br />
+      <strong>🐱 第 3 集《被窝撸猫，AI 干完一千行》</strong><br />
+      <sub>裹紧毛毯怀抱大橘，奶茶还没喝完，里屋 AI 已飙出 <code>+999 -12</code>，手机顺手「一键推送 ↑」</sub>
     </td>
   </tr>
 </table>
 
 ---
 
-## 效果预览
+## 📺 正片实拍 · 高能实机演示
 
-### 实机动态演示：双端同步审批（Mac 浮窗 + 手机通知栏实时联动）
+### 【高能名场面】双端同步审批：Mac 浮窗 × 手机通知栏实时联动
 
 <p align="center">
   <img src="docs/screenshots/demo-dual-approval.webp" alt="双端同步审批动态演示" width="840" /><br />
-  <sub>AI 触发高危操作时，Mac 屏幕右上角原生悬浮窗与手机通知栏同时弹出；手机一键点击「允许」后，Mac 悬浮窗立即自动消失并继续执行任务</sub>
+  <sub>AI 刚触发高危命令，Mac 右上角原生悬浮窗与手机通知栏同时拉响警报；手机随手点一下「允许」，Mac 浮窗当场消失、任务无缝继续！</sub>
 </p>
 
-### 1. 通知栏直接审批与统一消息中心
+### 第一集：通知栏一键发号施令，多 AI 消息统一归档
 
 <table>
   <tr>
     <td align="center" width="25%">
       <img src="docs/screenshots/00-approval-notification.webp" alt="通知栏直接审批" width="190" /><br />
-      <sub>通知栏直接点「允许 / 拒绝 / 退回电脑」</sub>
+      <sub>通知栏直接批复「允许 / 拒绝 / 退回电脑」</sub>
     </td>
     <td align="center" width="25%">
       <img src="docs/screenshots/01-notification.webp" alt="通知栏任务完成推送" width="190" /><br />
-      <sub>任务完成推送与一键进入终端</sub>
+      <sub>活干完秒报喜，一键直达现场终端</sub>
     </td>
     <td align="center" width="25%">
       <img src="docs/screenshots/02-messages.webp" alt="消息列表" width="190" /><br />
-      <sub>多 AI 统一消息流与绿点直达终端</sub>
+      <sub>三大 AI 战报汇总，绿点秒切终端</sub>
     </td>
     <td align="center" width="25%">
       <img src="docs/screenshots/03-message-detail.webp" alt="消息详情" width="190" /><br />
-      <sub>任务完成与异常详情弹窗</sub>
+      <sub>任务战果与报错详情一览无余</sub>
     </td>
   </tr>
 </table>
 
 <p align="center">
   <img src="docs/screenshots/00b-mac-approval-popup.webp" alt="Mac 原生悬浮审批窗" width="540" /><br />
-  <sub>双端同步模式下的 Mac 屏幕右上角原生悬浮审批卡片（支持高危红框、倒计时、拒绝理由与一键退回终端）</sub>
+  <sub>人在电脑前也不耽误：双端同步模式下的 Mac 原生悬浮审批卡（高危红框、倒计时、拒绝理由、一键退回终端全配齐）</sub>
 </p>
 
-### 2. 实时交互终端与 Mac 端同步弹窗
+### 第二集：加密暗道接管终端，手机一声令下 Mac 自动弹窗
 
 <table>
   <tr>
     <td align="center" width="33%">
       <img src="docs/screenshots/04-terminal-sessions.webp" alt="终端会话列表" width="230" /><br />
-      <sub>活跃 tmux 会话池与一键新建终端</sub>
+      <sub>活跃 tmux 会话池，手机一键新开终端</sub>
     </td>
     <td align="center" width="33%">
       <img src="docs/screenshots/05-terminal-live.webp" alt="实时终端" width="230" /><br />
-      <sub>xterm.js 实时终端与中文提示词输入条</sub>
+      <sub>xterm.js 丝滑实况终端 + 中文提示词直发条</sub>
     </td>
     <td align="center" width="33%">
       <img src="docs/screenshots/06-terminal-gamepad.webp" alt="悬浮方向键与快捷键" width="230" /><br />
-      <sub>可拖动悬浮方向键与常用快捷键手柄</sub>
+      <sub>悬浮方向键与 Ctrl+C / Tab 快捷键手柄</sub>
     </td>
   </tr>
 </table>
 
 <p align="center">
   <img src="docs/screenshots/07-mac-terminal-sync.webp" alt="Mac 端同步弹窗终端" width="760" /><br />
-  <sub>手机新建终端时，Mac 端自动同步弹出 Terminal 窗口并共享同一 tmux 会话</sub>
+  <sub>手机端新建终端瞬间，远端 Mac 同步自动弹出 Terminal 窗口并共享同一 tmux 画面，回到工位无缝续写</sub>
 </p>
 
-### 3. 远程免下载文件浏览、代码高亮与在线编辑
+### 第三集：文件免下载随手查，躺平也能在线改代码
 
 <table>
   <tr>
     <td align="center" width="33%">
       <img src="docs/screenshots/08-files-browser.webp" alt="文件浏览器" width="230" /><br />
-      <sub>沙箱目录浏览与文件名 / rg 内容检索</sub>
+      <sub>沙箱目录按需流式浏览 + 文件名 / rg 全文秒搜</sub>
     </td>
     <td align="center" width="33%">
       <img src="docs/screenshots/09-code-viewer.webp" alt="代码高亮预览" width="230" /><br />
-      <sub>离线代码语法高亮与行号阅读器</sub>
+      <sub>离线代码语法高亮与行号丝滑阅读</sub>
     </td>
     <td align="center" width="33%">
       <img src="docs/screenshots/10-code-editor.webp" alt="代码在线编辑" width="230" /><br />
-      <sub>远程在线编辑（保存前 Diff 与乐观锁）</sub>
+      <sub>在线改代码（保存前强制 Diff + 乐观锁护体）</sub>
     </td>
   </tr>
 </table>
 
-### 4. 移动端 Git 工作台（状态探测 · Diff · 批量 Commit / Push）
+### 第四集：手机端 Git 工作台，看 Diff · 批量 Commit · 安全 Push
 
 <table>
   <tr>
     <td align="center" width="33%">
       <img src="docs/screenshots/12-git-repo-banner.webp" alt="Git 仓库状态条" width="230" /><br />
-      <sub>自动识别 Git 仓库与未提交改动微标</sub>
+      <sub>自动嗅探 Git 仓库，未提交改动一眼锁定</sub>
     </td>
     <td align="center" width="33%">
       <img src="docs/screenshots/13-git-workbench.webp" alt="Git 批量提交工作台" width="230" /><br />
-      <sub>精准勾选批量 Commit 与安全 Push</sub>
+      <sub>精准勾选批量 Commit，优雅一键 Push</sub>
     </td>
     <td align="center" width="33%">
       <img src="docs/screenshots/14-git-diff.webp" alt="Git Diff 查看器" width="230" /><br />
-      <sub>工作区 / 暂存区红绿高亮 Diff 阅读</sub>
+      <sub>工作区 / 暂存区红绿高亮 Diff 逐行审阅</sub>
     </td>
   </tr>
 </table>
 
-### 5. 控制中心、审批模式与安全开关
+### 第五集：大结局中控台，审批模式 · 一键熔断 · 指纹锁全掌控
 
 <p align="center">
   <img src="docs/screenshots/11-control-panel.webp" alt="控制中心设置" width="260" /><br />
-  <sub>通道状态、主题切换、审批模式、远程能力熔断、指纹门禁、扫码配对与后台保活体检</sub>
+  <sub>通道心跳、明暗主题、四种审批模式、远程能力一键熔断、生物识别门禁、扫码秒连与保活体检一站式拿捏</sub>
 </p>
 
 ---
 
-## 目录结构
+## 🗺️ 剧组架构 · 目录结构
 
 ```text
 phone_ai_audit/
 ├── config.env.example                  # 统一构建与部署配置模板（复制为 config.env 后使用，已 gitignore）
 ├── docs/
-│   ├── assets/                         # README 展示用 Vibe Coding 主题插画 (WebP)
-│   └── screenshots/                    # README 展示用脱敏 WebP 截图与动态演示
-├── relay/                              # Linux Go 中转服务 (ai-audit-relay, SQLite WAL, 低内存占用)
+│   ├── assets/                         # README 红果短剧风格动态剧场与海报素材 (WebP)
+│   └── screenshots/                    # README 实机脱敏 WebP 截图与动态演示
+├── relay/                              # Linux Go 中转服务 (ai-audit-relay, SQLite WAL, 极低内存占用)
 │   └── .env.example                    # Relay 运行时环境变量模板
 ├── mac-agent/                          # Mac 守护进程 (ai-audit-agent) + Hook 适配器 + 悬浮审批窗 + 控制 CLI
 │   ├── config.example.json             # Mac 端配置模板 (~/.config/ai-audit/config.json)
@@ -174,9 +183,9 @@ phone_ai_audit/
 
 ---
 
-## 配置说明（隐私与本地配置隔离）
+## 🔐 幕后保密协议 · 配置说明（隐私与本地配置隔离）
 
-所有与个人服务器、域名、证书、Token、本地目录和代理相关的配置均通过本地配置文件管理，且已列入 `.gitignore` 防止误提交：
+> 真正的大佬，绝不把个人服务器、域名、证书和 Token 传上 GitHub！所有隐私配置全部隔离在本地文件并已加入 `.gitignore`：
 
 | 模板文件（已入库） | 个人配置文件（已 gitignore） | 用途 |
 | :--- | :--- | :--- |
@@ -189,20 +198,20 @@ phone_ai_audit/
 
 ---
 
-## 快速开始
+## 🚀 三分钟开机 · 快速部署指南
 
-### 1. 初始化配置文件
+### 第 1 步：签下剧组配置（初始化配置文件）
 
 ```bash
 cp config.env.example config.env
 cp android/local.properties.example android/local.properties
 ```
 
-按你的实际环境编辑 `config.env`（域名、端口、SSH 主机、TLS 证书路径、允许手机访问的 `MAC_FILE_ROOTS` 等）和 `android/local.properties`（`sdk.dir`）。
+按你的实际环境填好 `config.env`（域名、端口、SSH 主机、TLS 证书路径、允许手机翻阅的 `MAC_FILE_ROOTS` 等）和 `android/local.properties`（`sdk.dir`）。
 
-### 2. 编译并部署中转服务 (`relay/`)
+### 第 2 步：架起加密信号塔（编译并部署中转服务 `relay/`）
 
-前置条件：一台具有公网域名和有效 TLS 证书（如 Let's Encrypt）的 Linux 服务器，并放行你在 `config.env` 中配置的 `RELAY_PUBLIC_PORT`（默认 `9876`）。
+前置条件：一台有公网域名和有效 TLS 证书（如 Let's Encrypt）的 Linux 服务器，并放行 `config.env` 里配置的 `RELAY_PUBLIC_PORT`（默认 `9876`）。
 
 ```bash
 mkdir -p dist
@@ -216,9 +225,9 @@ mkdir -p dist
 
 > 若手动部署，可参考 `relay/.env.example`、`deploy/ai-audit-relay.service.example` 与 `deploy/nginx-audit.conf.example`。
 
-### 3. 编译并安装 Mac 端守护进程与 Hook (`mac-agent/`)
+### 第 3 步：给 Mac 装上外挂大脑（编译并安装 Mac 守护进程与 Hook `mac-agent/`）
 
-前置条件：已安装 Go 1.24+、Homebrew、`tmux`（可选 `ripgrep`、`poppler`、`ffmpeg` 以启用全文搜索、PDF 渲染和媒体预览）。
+前置条件：已安装 Go 1.24+、Homebrew、`tmux`（可选 `ripgrep`、`poppler`、`ffmpeg` 以解锁全文搜索、PDF 渲染和媒体预览）。
 
 ```bash
 # 编译 Mac 端组件（含原生双端悬浮审批弹窗）
@@ -234,7 +243,7 @@ swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 ./mac-agent/scripts/install.sh
 ```
 
-### 4. 编译 Android App (`android/`)
+### 第 4 步：拿到掌中遥控器（编译 Android App `android/`）
 
 前置条件：JDK 17 + Android SDK（Command-line Tools 或 Android Studio）。
 
@@ -242,33 +251,33 @@ swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 ./android/build-apk.sh
 ```
 
-安装生成的 `dist/PhoneAiAudit-latest.apk` 到手机，打开 App → **「控制」** → **「扫码配对」**，扫描 Mac 端 `ai-audit pair` 输出的二维码即可完成连接。
+把生成的 `dist/PhoneAiAudit-latest.apk` 装进手机，打开 App → **「控制」** → **「扫码配对」**，对着 Mac 端 `ai-audit pair` 弹出的二维码一扫——**开机大吉，随时随地开启爽剧人生！**
 
 ---
 
-## 日常使用指南
+## 👑 主角日常操作手册（日常使用指南）
 
-### 1. Mac 端常用命令
+### 1. Mac 端核心口令
 
 ```bash
 # 查看中转、手机在线状态、当前审批模式与活跃 tmux 会话
 ai-audit status
 
-# 切换审批模式：
-#   auto   = 智能离座（电脑前直接走本地弹窗，离座 60s 或锁屏自动转手机）
-#   both   = 双端同步（电脑屏幕右上角悬浮窗与手机通知栏同时弹出审批，哪边先点以哪边为准，另一端自动消失）
-#   phone  = 始终走手机审批
-#   notify = 仅收消息不阻塞
+# 切换四种审批模式：
+#   auto   = 智能离座（人在电脑前走本地弹窗，离座 60s 或锁屏自动转交手机）
+#   both   = 双端同步（Mac 右上角悬浮窗与手机通知栏同时弹出，先点为准、另一端秒消失）
+#   phone  = 全程手机掌权（无论人在哪儿，统统发到手机审批）
+#   notify = 仅收战报不阻塞
 ai-audit mode auto
 ai-audit mode both
 ai-audit mode phone
 ai-audit mode notify
 
-# 开启/关闭 Mac 防休眠 (caffeinate)
+# 开启/关闭 Mac 防休眠 (caffeinate)，离座也不怕电脑睡着
 ai-audit awake on
 ai-audit awake off
 
-# 开启/关闭远程终端 / 远程文件总开关
+# 一键开启/熔断远程终端与远程文件权限
 ai-audit terminal on
 ai-audit terminal off
 ai-audit files on
@@ -277,14 +286,14 @@ ai-audit files off
 # 生成手机 App 扫码配对二维码
 ai-audit pair
 
-# 发送联通测试消息 / 发起测试审批
+# 试戏演练：发送联通测试消息 / 发起测试审批
 ai-audit test-msg
 ai-audit test-approve
 ```
 
-### 2. 让手机随时接管电脑上的 AI 终端（`tmux` 无感封装）
+### 2. 让手机随时空降 AI 终端（`ai-tmux` 无感封装）
 
-在项目目录下使用 `ai-tmux` 启动 AI（默认开启鼠标滚轮与剪贴板同步）：
+在项目目录里用 `ai-tmux` 启动 AI（默认开好鼠标滚轮与剪贴板同步，Mac 上用着完全无感）：
 
 ```bash
 ai-tmux claude      # 启动/进入 claude-<当前目录名> 会话
@@ -293,22 +302,22 @@ ai-tmux agy         # 启动/进入 agy-<当前目录名> 会话
 ai-tmux             # 启动/进入当前目录的普通 shell 会话
 ```
 
-此后在手机 App 的 **「终端」** Tab，或者任意审批/消息卡片上点 **「进终端」**，即可直接接入同一终端画面并实时交互。
+之后不管你是在厕所、地铁还是沙滩上，打开手机 App **「终端」** Tab，或在任意消息/审批卡片上点 **「进终端」**，直接空降同一画面实时指挥！
 
-### 3. 首次使用 Codex 审批钩子
+### 3. 首次解锁 Codex 审批钩子
 
-Codex 对自定义 `hooks.json` 有首次信任校验。安装后请打开一次 `codex` CLI 并输入 `/hooks` 确认信任 `~/.codex/hooks.json`。
+Codex 对自定义 `hooks.json` 有首次信任校验。安装完成后打开一次 `codex` CLI 并输入 `/hooks`，确认信任 `~/.codex/hooks.json` 即可生效。
 
-### 4. Android 后台保活建议
+### 4. Android 后台不掉线秘籍（保活建议）
 
-本 App 使用前台服务维持 WebSocket 长连接（不依赖 Google FCM）。打开 App → **「控制」** Tab 底部保活体检卡，按系统指引依次完成：
+本 App 通过前台服务直连 WebSocket 长连接（不依赖 Google FCM）。打开 App → **「控制」** Tab 底部保活体检卡，按系统指引点亮四项护盾：
 
-1. 允许通知，并确保「AI 审批与紧急提醒」渠道开启悬浮横幅与锁屏显示；
-2. 电池 / 省电策略 → 忽略电池优化（允许后台高耗电 / 无限制）；
+1. 允许通知，并确保「AI 审批与紧急提醒」渠道开启 **悬浮横幅** 与 **锁屏显示**；
+2. 电池 / 省电策略 → **忽略电池优化**（允许后台高耗电 / 无限制）；
 3. 权限管理 → 开启 **自启动**；
-4. 多任务界面下拉 **锁定** App 卡片（可选）。
+4. 多任务界面下拉 **锁定** App 卡片（可选，防手滑清后台）。
 
-### 5. 一键回滚 Mac Hook 与守护进程
+### 5. 一键杀青回滚（卸载 Mac Hook 与守护进程）
 
 ```bash
 ./mac-agent/scripts/rollback.sh
