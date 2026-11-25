@@ -1,20 +1,17 @@
 # Phone AI Audit
 
-<p align="center">
-  <strong>🔥 爆款都市程序员爽剧 · 全 5 集热播中 🔥</strong><br />
-  <h3>《人不在工位，我靠手机遥控 AI 一键上线》</h3>
-</p>
+<h3 align="center">《人不在工位，我靠手机遥控 AI 一键上线》</h3>
 
 <p align="center">
-  <img src="docs/assets/vibe-hero-drama.webp" alt="红果短剧动图：老板查岗，我人不在工位但需求全上线了" width="840" /><br />
-  <sub>【第 1 集名场面 · 动图连播】老板查岗怒吼「人呢？！」，主角在海边喝着椰子水手机一点「允许 ✓」，工位 Mac 上的 AI 三秒写完自动部署，老板当场瞳孔地震！</sub>
+  <img src="docs/assets/vibe-hero-drama.webp" alt="老板查岗，我人不在工位但需求全上线了" width="840" /><br />
+  <sub>老板查岗怒吼「人呢？！」，你在海边喝着椰子水手机一点「允许 ✓」，工位 Mac 上的 AI 三秒写完自动部署，老板当场瞳孔地震！</sub>
 </p>
 
 > **「什么？！他人都去海边度假了，这三万行需求怎么全上线了？！」**
 >
 > 别人苦守工位熬到凌晨三点给 AI 点确认，你却在海边躺吊床、地铁扶吊环、被窝撸大橘——手机轻轻一点，远端 Mac 上的 **Claude Code / OpenAI Codex / Antigravity** 瞬间满血开工，审批、终端、看代码、Diff、Commit、Push 一条龙全包！
 
-### 🎬 领衔主演 · 四大逆天金手指
+### 🔥 四大逆天金手指
 
 - **👑 三大 AI 统统归你差遣**：全面接管 **Claude Code**、**OpenAI Codex**、**Antigravity (`agy`)**，任务完成、突发报错、等待回答、高危权限审批，第一时间秒推到你手里；
 - **⚡ 通知栏一键生杀大权（支持双端同步）**：锁屏下拉直接点 **允许 / 拒绝（顺手回一句理由）/ 退回电脑**；开启 **双端同步 (`both`)** 模式后，Mac 右上角原生悬浮窗与手机通知栏同步弹起，**哪边先点以哪边为准，另一端秒消失**，删库跑路等高危命令自带指纹/面容二次门禁；
@@ -23,25 +20,25 @@
 
 ---
 
-## 🔥 红果热播榜 · 随时随地 Vibe Coding
+## 随时随地 Vibe Coding
 
 > **「电脑交给 AI 疯狂写码，生杀大权握在手机——人在哪儿，工位就在哪儿！」**
 
 <table>
   <tr>
     <td align="center" width="33%">
-      <img src="docs/assets/vibe-toilet.webp" alt="爆款爽剧：带薪蹲坑，遥控AI狂写代码" width="250" /><br />
-      <strong>🔥 第 1 集《带薪蹲坑，遥控 AI 狂写代码》</strong><br />
+      <img src="docs/assets/vibe-toilet.webp" alt="带薪蹲坑，遥控AI狂写代码" width="250" /><br />
+      <strong>🔥《带薪蹲坑，遥控 AI 狂写代码》</strong><br />
       <sub>锁屏弹出权限请求？微微一笑点下「允许 ✓」，工位 Mac 继续狂飙，灵感与进度双丰收</sub>
     </td>
     <td align="center" width="33%">
-      <img src="docs/assets/vibe-commute.webp" alt="热播榜一：早高峰地铁，单手优雅发新版" width="250" /><br />
-      <strong>🚇 第 2 集《早高峰地铁，单手优雅发新版》</strong><br />
+      <img src="docs/assets/vibe-commute.webp" alt="早高峰地铁，单手优雅发新版" width="250" /><br />
+      <strong>🚇《早高峰地铁，单手优雅发新版》</strong><br />
       <sub>全车厢打工人昏昏欲睡，唯独你戴上耳机单手扶吊环，嘴角微扬点下「批准上线 ✓」</sub>
     </td>
     <td align="center" width="33%">
-      <img src="docs/assets/vibe-couch.webp" alt="都市逆袭：被窝撸猫，AI干完一千行" width="250" /><br />
-      <strong>🐱 第 3 集《被窝撸猫，AI 干完一千行》</strong><br />
+      <img src="docs/assets/vibe-couch.webp" alt="被窝撸猫，AI干完一千行" width="250" /><br />
+      <strong>🐱《被窝撸猫，AI 干完一千行》</strong><br />
       <sub>裹紧毛毯怀抱大橘，奶茶还没喝完，里屋 AI 已飙出 <code>+999 -12</code>，手机顺手「一键推送 ↑」</sub>
     </td>
   </tr>
@@ -49,16 +46,16 @@
 
 ---
 
-## 📺 正片实拍 · 高能实机演示
+## 实机效果演示
 
-### 【高能名场面】双端同步审批：Mac 浮窗 × 手机通知栏实时联动
+### 双端同步审批：Mac 浮窗 × 手机通知栏实时联动
 
 <p align="center">
   <img src="docs/screenshots/demo-dual-approval.webp" alt="双端同步审批动态演示" width="840" /><br />
   <sub>AI 刚触发高危命令，Mac 右上角原生悬浮窗与手机通知栏同时拉响警报；手机随手点一下「允许」，Mac 浮窗当场消失、任务无缝继续！</sub>
 </p>
 
-### 第一集：通知栏一键发号施令，多 AI 消息统一归档
+### 1. 通知栏一键发号施令，多 AI 消息统一归档
 
 <table>
   <tr>
@@ -86,7 +83,7 @@
   <sub>人在电脑前也不耽误：双端同步模式下的 Mac 原生悬浮审批卡（高危红框、倒计时、拒绝理由、一键退回终端全配齐）</sub>
 </p>
 
-### 第二集：加密暗道接管终端，手机一声令下 Mac 自动弹窗
+### 2. 加密暗道接管终端，手机一声令下 Mac 自动弹窗
 
 <table>
   <tr>
@@ -110,7 +107,7 @@
   <sub>手机端新建终端瞬间，远端 Mac 同步自动弹出 Terminal 窗口并共享同一 tmux 画面，回到工位无缝续写</sub>
 </p>
 
-### 第三集：文件免下载随手查，躺平也能在线改代码
+### 3. 文件免下载随手查，躺平也能在线改代码
 
 <table>
   <tr>
@@ -129,7 +126,7 @@
   </tr>
 </table>
 
-### 第四集：手机端 Git 工作台，看 Diff · 批量 Commit · 安全 Push
+### 4. 手机端 Git 工作台，看 Diff · 批量 Commit · 安全 Push
 
 <table>
   <tr>
@@ -148,7 +145,7 @@
   </tr>
 </table>
 
-### 第五集：大结局中控台，审批模式 · 一键熔断 · 指纹锁全掌控
+### 5. 终极中控台：审批模式 · 一键熔断 · 指纹锁全掌控
 
 <p align="center">
   <img src="docs/screenshots/11-control-panel.webp" alt="控制中心设置" width="260" /><br />
@@ -157,13 +154,13 @@
 
 ---
 
-## 🗺️ 剧组架构 · 目录结构
+## 目录结构
 
 ```text
 phone_ai_audit/
 ├── config.env.example                  # 统一构建与部署配置模板（复制为 config.env 后使用，已 gitignore）
 ├── docs/
-│   ├── assets/                         # README 红果短剧风格动态剧场与海报素材 (WebP)
+│   ├── assets/                         # README 展示用 Vibe Coding 动图与场景海报 (WebP)
 │   └── screenshots/                    # README 实机脱敏 WebP 截图与动态演示
 ├── relay/                              # Linux Go 中转服务 (ai-audit-relay, SQLite WAL, 极低内存占用)
 │   └── .env.example                    # Relay 运行时环境变量模板
@@ -183,7 +180,7 @@ phone_ai_audit/
 
 ---
 
-## 🔐 幕后保密协议 · 配置说明（隐私与本地配置隔离）
+## 🔐 隐私与本地配置隔离
 
 > 真正的大佬，绝不把个人服务器、域名、证书和 Token 传上 GitHub！所有隐私配置全部隔离在本地文件并已加入 `.gitignore`：
 
@@ -198,9 +195,9 @@ phone_ai_audit/
 
 ---
 
-## 🚀 三分钟开机 · 快速部署指南
+## 🚀 三分钟极速部署
 
-### 第 1 步：签下剧组配置（初始化配置文件）
+### 第 1 步：初始化配置文件
 
 ```bash
 cp config.env.example config.env
@@ -251,11 +248,11 @@ swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 ./android/build-apk.sh
 ```
 
-把生成的 `dist/PhoneAiAudit-latest.apk` 装进手机，打开 App → **「控制」** → **「扫码配对」**，对着 Mac 端 `ai-audit pair` 弹出的二维码一扫——**开机大吉，随时随地开启爽剧人生！**
+把生成的 `dist/PhoneAiAudit-latest.apk` 装进手机，打开 App → **「控制」** → **「扫码配对」**，对着 Mac 端 `ai-audit pair` 弹出的二维码一扫——**大功告成，随时随地开启躺平写码人生！**
 
 ---
 
-## 👑 主角日常操作手册（日常使用指南）
+## 👑 日常操作手册
 
 ### 1. Mac 端核心口令
 
@@ -286,7 +283,7 @@ ai-audit files off
 # 生成手机 App 扫码配对二维码
 ai-audit pair
 
-# 试戏演练：发送联通测试消息 / 发起测试审批
+# 联通测试：发送测试消息 / 发起测试审批
 ai-audit test-msg
 ai-audit test-approve
 ```
@@ -317,7 +314,7 @@ Codex 对自定义 `hooks.json` 有首次信任校验。安装完成后打开一
 3. 权限管理 → 开启 **自启动**；
 4. 多任务界面下拉 **锁定** App 卡片（可选，防手滑清后台）。
 
-### 5. 一键杀青回滚（卸载 Mac Hook 与守护进程）
+### 5. 一键撤退回滚（卸载 Mac Hook 与守护进程）
 
 ```bash
 ./mac-agent/scripts/rollback.sh
