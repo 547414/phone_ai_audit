@@ -99,7 +99,8 @@ object AuditNotifier {
         context: Context,
         item: ApprovalItem,
         highRiskRequireApp: Boolean,
-        autoApproveOnTimeout: Boolean = true
+        autoApproveOnTimeout: Boolean = true,
+        silentUpdate: Boolean = false
     ) {
         val notifId = approvalNotificationId(item.id)
         val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -112,8 +113,9 @@ object AuditNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val isPaused = item.expiresAt == 0L
         val nowMs = System.currentTimeMillis()
-        val leftMs = if (item.expiresAt > nowMs) item.expiresAt - nowMs else 0L
+        val leftMs = if (!isPaused && item.expiresAt > nowMs) item.expiresAt - nowMs else 0L
         val leftSec = if (leftMs > 0L) ((leftMs + 999L) / 1000L) else 0L
 
         val riskTag = if (item.isHighRisk) "【高危】" else ""
@@ -125,7 +127,9 @@ object AuditNotifier {
             if (item.riskReasons.isNotEmpty()) {
                 append("\n风险: ${item.riskReasons.joinToString("；")}")
             }
-            if (autoApproveOnTimeout && leftSec > 0L) {
+            if (isPaused) {
+                append("\n状态: 输入中 · 倒计时已暂停")
+            } else if (autoApproveOnTimeout && leftSec > 0L) {
                 append("\n超时提示: ${leftSec}s 内未操作将自动允许")
             }
         }
@@ -141,11 +145,19 @@ object AuditNotifier {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(false)
             .setContentIntent(openPi)
-        if (autoApproveOnTimeout && leftSec > 0L) {
-            builder.setSubText("${leftSec}s 自动允许")
+        if (silentUpdate) {
+            builder.setSilent(true).setOnlyAlertOnce(true)
         }
-        if (leftMs > 0L) {
-            builder.setTimeoutAfter(leftMs + 1500L)
+        if (isPaused) {
+            val pausedLabel = if (item.pausedRemainingSec > 0) "已暂停 (${item.pausedRemainingSec}s)" else "输入中 · 已暂停"
+            builder.setSubText(pausedLabel)
+        } else {
+            if (autoApproveOnTimeout && leftSec > 0L) {
+                builder.setSubText("${leftSec}s 自动允许")
+            }
+            if (leftMs > 0L) {
+                builder.setTimeoutAfter(leftMs + 1500L)
+            }
         }
 
         // Allow action: runs silently in background via BroadcastReceiver without opening the App UI

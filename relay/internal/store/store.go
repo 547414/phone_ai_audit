@@ -295,6 +295,30 @@ WHERE id = ? AND status = 'pending'`,
 	return a, nil
 }
 
+func (s *Store) SetApprovalExpiresAt(ctx context.Context, id string, expiresAt int64) (model.Approval, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE approvals
+SET expires_at = ?
+WHERE id = ? AND status = 'pending'`,
+		expiresAt, id,
+	)
+	if err != nil {
+		return model.Approval{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return model.Approval{}, err
+	}
+	a, err := s.GetApproval(ctx, id)
+	if err != nil {
+		return model.Approval{}, err
+	}
+	if n == 0 {
+		return a, ErrAlreadyResolved
+	}
+	return a, nil
+}
+
 func (s *Store) ExpirePendingApprovals(ctx context.Context, nowMs int64, targetStatus string) ([]model.Approval, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id FROM approvals WHERE status = 'pending' AND expires_at > 0 AND expires_at <= ?`,

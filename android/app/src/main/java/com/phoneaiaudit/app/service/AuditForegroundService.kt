@@ -246,6 +246,23 @@ class AuditForegroundService : Service() {
                     .forEach { AuditNotifier.cancelMessage(this, it.id) }
             }
 
+            "approval.expiry_updated" -> {
+                val aObj = obj.optJSONObject("approval") ?: return
+                val remSec = obj.optInt("remaining_sec", 0)
+                val item = ApprovalItem.fromJson(aObj).copy(pausedRemainingSec = if (obj.optBoolean("paused", false)) remSec else 0)
+                AuditRepository.onApprovalExpiryUpdated(item)
+                if (item.isPending) {
+                    val curSettings = AuditRepository.status.value.settings
+                    AuditNotifier.showApproval(
+                        this,
+                        item,
+                        curSettings.highRiskRequireApp,
+                        curSettings.timeoutAction == "approve",
+                        silentUpdate = true
+                    )
+                }
+            }
+
             "message.created" -> {
                 val mObj = obj.optJSONObject("message") ?: return
                 val msg = AuditMessage.fromJson(mObj)

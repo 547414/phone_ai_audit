@@ -21,17 +21,61 @@ struct PromptOutput: Encodable {
 }
 
 final class FloatingApprovalPanel: NSPanel {
+    weak var trackedTextField: NSTextField?
+    var onBlurTextField: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown || event.type == .rightMouseDown {
+            if let tf = trackedTextField {
+                let pt = tf.convert(event.locationInWindow, from: nil)
+                if !tf.bounds.contains(pt) {
+                    let isEditing = (self.firstResponder === tf.currentEditor() || self.firstResponder === tf)
+                    let hitView = self.contentView?.hitTest(event.locationInWindow)
+                    let isActionButton = (hitView is NSButton) || (hitView?.superview is NSButton)
+                    if isEditing {
+                        self.makeFirstResponder(nil)
+                    }
+                    if !isActionButton {
+                        onBlurTextField?()
+                    }
+                }
+            }
+        }
+        super.sendEvent(event)
+    }
 }
 
-final class PromptController: NSObject, NSTextFieldDelegate {
+final class PauseAwareTextField: NSTextField {
+    var onFocusBegin: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok {
+            onFocusBegin?()
+        }
+        return ok
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        self.window?.makeKey()
+        onFocusBegin?()
+        super.mouseDown(with: event)
+    }
+}
+
+final class PromptController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let input: PromptInput
     private var panel: FloatingApprovalPanel!
-    private var reasonField: NSTextField!
+    private var reasonField: PauseAwareTextField!
     private var timerLabel: NSTextField!
     private var remainingSec: Int
     private var countdownTimer: Timer?
+    private var sigUsr1Source: DispatchSourceSignal?
+    private var sigUsr2Source: DispatchSourceSignal?
+    private var globalClickMonitor: Any?
+    private var paused = false
     private var finished = false
 
     init(input: PromptInput) {
@@ -107,13 +151,33 @@ final class PromptController: NSObject, NSTextFieldDelegate {
         root.layer?.borderColor = (isHighRisk ? NSColor.systemRed.withAlphaComponent(0.75) : NSColor.separatorColor.withAlphaComponent(0.6)).cgColor
 
         panel.contentView = root
+        panel.delegate = self
         buildLayout(in: root, width: width, height: height, hasTaskTitle: hasTaskTitle, hasReasons: hasReasons)
+        panel.trackedTextField = reasonField
+        panel.onBlurTextField = { [weak self] in
+            self?.setPaused(false, notifyParent: true)
+        }
 
         panel.orderFrontRegardless()
         playSubtleSound()
+        installPauseSignals()
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self = self, !self.finished else { return }
+            DispatchQueue.main.async {
+                if self.panel.firstResponder === self.reasonField?.currentEditor() || self.panel.firstResponder === self.reasonField {
+                    self.panel.makeFirstResponder(nil)
+                }
+                if self.paused {
+                    self.setPaused(false, notifyParent: true)
+                }
+            }
+        }
 
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
+            if self.paused {
+                return
+            }
             self.remainingSec -= 1
             if self.remainingSec <= 0 {
                 switch self.timeoutAction {
@@ -128,6 +192,58 @@ final class PromptController: NSObject, NSTextFieldDelegate {
             }
             self.timerLabel.stringValue = self.formatCountdown(self.remainingSec)
             self.timerLabel.textColor = self.countdownColor(self.remainingSec)
+        }
+    }
+
+    private func installPauseSignals() {
+        signal(SIGUSR1, SIG_IGN)
+        let s1 = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        s1.setEventHandler { [weak self] in
+            self?.setPaused(true, notifyParent: false)
+        }
+        s1.resume()
+        sigUsr1Source = s1
+
+        signal(SIGUSR2, SIG_IGN)
+        let s2 = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
+        s2.setEventHandler { [weak self] in
+            self?.setPaused(false, notifyParent: false)
+        }
+        s2.resume()
+        sigUsr2Source = s2
+    }
+
+    private func setPaused(_ shouldPause: Bool, notifyParent: Bool) {
+        guard !finished else { return }
+        if paused == shouldPause {
+            return
+        }
+        paused = shouldPause
+        if paused {
+            timerLabel.stringValue = "已暂停 (\(remainingSec)s)"
+            timerLabel.textColor = .systemBlue
+        } else {
+            // Resume from the exact paused remainingSec (never restart full timeout)
+            timerLabel.stringValue = formatCountdown(remainingSec)
+            timerLabel.textColor = countdownColor(remainingSec)
+        }
+        if notifyParent {
+            let ev = paused
+                ? "{\"event\":\"pause\",\"remaining_sec\":\(remainingSec)}\n"
+                : "{\"event\":\"resume\",\"remaining_sec\":\(remainingSec)}\n"
+            if let data = ev.data(using: .utf8) {
+                FileHandle.standardOutput.write(data)
+            }
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard !finished else { return }
+        if panel.firstResponder === reasonField?.currentEditor() || panel.firstResponder === reasonField {
+            panel.makeFirstResponder(nil)
+        }
+        if paused {
+            setPaused(false, notifyParent: true)
         }
     }
 
@@ -163,7 +279,7 @@ final class PromptController: NSObject, NSTextFieldDelegate {
         closeBtn.frame = NSRect(x: width - pad - 20, y: curY, width: 20, height: 22)
         root.addSubview(closeBtn)
 
-        let timerW: CGFloat = autoApproveOnTimeout ? 92 : 44
+        let timerW: CGFloat = 104
         timerLabel = NSTextField(labelWithString: formatCountdown(remainingSec))
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
         timerLabel.textColor = countdownColor(remainingSec)
@@ -237,13 +353,16 @@ final class PromptController: NSObject, NSTextFieldDelegate {
         curY -= 10
         let inputH: CGFloat = 26
         curY -= inputH
-        reasonField = NSTextField(frame: NSRect(x: pad, y: curY, width: innerW, height: inputH))
-        reasonField.placeholderString = "可选：输入拒绝理由后点「拒绝」（或按回车拒绝）"
+        reasonField = PauseAwareTextField(frame: NSRect(x: pad, y: curY, width: innerW, height: inputH))
+        reasonField.placeholderString = "可选：输入拒绝理由（点击输入自动暂停倒计时，回车拒绝）"
         reasonField.font = NSFont.systemFont(ofSize: 12)
         reasonField.isBezeled = true
         reasonField.bezelStyle = .roundedBezel
         reasonField.focusRingType = .none
         reasonField.delegate = self
+        reasonField.onFocusBegin = { [weak self] in
+            self?.setPaused(true, notifyParent: true)
+        }
         root.addSubview(reasonField)
 
         // 6. Action buttons row: 允许 | 拒绝 | 退回终端
@@ -341,6 +460,20 @@ final class PromptController: NSObject, NSTextFieldDelegate {
     private func playSubtleSound() {
         let name = isHighRisk ? "Basso" : "Tink"
         NSSound(named: NSSound.Name(name))?.play()
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        setPaused(true, notifyParent: true)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        if !reasonField.stringValue.isEmpty {
+            setPaused(true, notifyParent: true)
+        }
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        setPaused(false, notifyParent: true)
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

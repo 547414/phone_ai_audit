@@ -200,8 +200,9 @@ type Hub struct {
 
 	apps map[string]*wsClient
 
-	waiters         map[string][]chan model.Approval
-	termListWaiters map[string]chan []model.TmuxSession
+	waiters           map[string][]chan model.Approval
+	pausedRemainingMs map[string]int64
+	termListWaiters   map[string]chan []model.TmuxSession
 	rpcWaiters      map[string]chan RPCResult
 	fsStreams       map[[16]byte]*FSStream
 	tickets         map[string]termTicket
@@ -212,8 +213,9 @@ func New(st *store.Store) *Hub {
 	return &Hub{
 		store:           st,
 		apps:            make(map[string]*wsClient),
-		waiters:         make(map[string][]chan model.Approval),
-		termListWaiters: make(map[string]chan []model.TmuxSession),
+		waiters:           make(map[string][]chan model.Approval),
+		pausedRemainingMs: make(map[string]int64),
+		termListWaiters:   make(map[string]chan []model.TmuxSession),
 		rpcWaiters:      make(map[string]chan RPCResult),
 		fsStreams:       make(map[[16]byte]*FSStream),
 		tickets:         make(map[string]termTicket),
@@ -474,11 +476,104 @@ func (h *Hub) DecideApproval(ctx context.Context, id, decision, reason, scope, d
 	return a, nil
 }
 
+// SetApprovalHold pauses (expires_at=0, preserving remaining ms) or resumes (from preserved
+// remaining seconds instead of restarting full timeout) a pending approval across Mac and Android.
+func (h *Hub) SetApprovalHold(ctx context.Context, id string, paused bool, resumeSec int) (model.Approval, error) {
+	nowMs := time.Now().UnixMilli()
+	var nextExpires int64
+	var remSec int
+
+	if paused {
+		cur, err := h.store.GetApproval(ctx, id)
+		if err != nil {
+			return model.Approval{}, err
+		}
+		if cur.Status != model.StatusPending {
+			return cur, store.ErrAlreadyResolved
+		}
+		var remMs int64
+		if resumeSec > 0 {
+			remMs = int64(resumeSec) * 1000
+		} else if cur.ExpiresAt > nowMs {
+			remMs = cur.ExpiresAt - nowMs
+		} else {
+			h.mu.RLock()
+			saved := h.pausedRemainingMs[id]
+			h.mu.RUnlock()
+			if saved > 0 {
+				remMs = saved
+			} else {
+				remMs = 1000
+			}
+		}
+		if remMs < 1000 {
+			remMs = 1000
+		}
+		if remMs > 600*1000 {
+			remMs = 600 * 1000
+		}
+		h.mu.Lock()
+		h.pausedRemainingMs[id] = remMs
+		h.mu.Unlock()
+		remSec = int((remMs + 999) / 1000)
+		nextExpires = 0
+	} else {
+		var remMs int64
+		if resumeSec > 0 {
+			remMs = int64(resumeSec) * 1000
+		} else {
+			h.mu.Lock()
+			remMs = h.pausedRemainingMs[id]
+			delete(h.pausedRemainingMs, id)
+			h.mu.Unlock()
+		}
+		if remMs <= 0 {
+			cfg, err := h.store.GetSettings(ctx)
+			if err == nil && cfg.DefaultTimeoutSec > 0 {
+				remMs = int64(cfg.DefaultTimeoutSec) * 1000
+			} else {
+				remMs = 30 * 1000
+			}
+		}
+		if remMs < 1000 {
+			remMs = 1000
+		}
+		if remMs > 600*1000 {
+			remMs = 600 * 1000
+		}
+		h.mu.Lock()
+		delete(h.pausedRemainingMs, id)
+		h.mu.Unlock()
+		remSec = int((remMs + 999) / 1000)
+		nextExpires = nowMs + remMs
+	}
+
+	a, err := h.store.SetApprovalExpiresAt(ctx, id, nextExpires)
+	if err != nil {
+		return a, err
+	}
+	frame := map[string]any{
+		"type":          "approval.expiry_updated",
+		"approval":      a,
+		"paused":        paused,
+		"remaining_sec": remSec,
+	}
+	h.broadcastApps(frame)
+	h.mu.RLock()
+	mac := h.mac
+	h.mu.RUnlock()
+	if mac != nil {
+		mac.enqueueJSON(frame)
+	}
+	return a, nil
+}
+
 func (h *Hub) onApprovalResolved(ctx context.Context, a model.Approval) {
 	// Wake HTTP waiters
 	h.mu.Lock()
 	chans := h.waiters[a.ID]
 	delete(h.waiters, a.ID)
+	delete(h.pausedRemainingMs, a.ID)
 	mac := h.mac
 	h.mu.Unlock()
 
@@ -1023,6 +1118,8 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 		ApprovalID    string              `json:"approval_id"`
 		Decision      string              `json:"decision"`
 		DecidedBy     string              `json:"decided_by"`
+		Paused        bool                `json:"paused"`
+		ResumeSec     int                 `json:"resume_sec"`
 		Message       *model.Message      `json:"message"`
 		StreamID      string              `json:"stream_id"`
 		Cols          int                 `json:"cols"`
@@ -1092,6 +1189,10 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 				decidedBy = "mac_local"
 			}
 			_, _ = h.DecideApproval(ctx, env.ApprovalID, env.Decision, env.Reason, "once", decidedBy)
+		}
+	case "approval.hold":
+		if env.ApprovalID != "" {
+			_, _ = h.SetApprovalHold(ctx, env.ApprovalID, env.Paused, env.ResumeSec)
 		}
 	case "approval.cancel":
 		if env.ApprovalID != "" {

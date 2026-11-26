@@ -172,6 +172,7 @@ fun ApprovalsScreen(
                         onDeny = {
                             denyReason = ""
                             denyTarget = item
+                            scope.launch { AuditRepository.setApprovalHold(item.id, paused = true) }
                         },
                         onFallback = { submitDecision(item, "fallback", "手机端选择退回电脑处理") },
                         onOpenTerminal = {
@@ -202,12 +203,17 @@ fun ApprovalsScreen(
 
     denyTarget?.let { target ->
         val presets = listOf("先不要执行，换个更安全方案", "请改在测试环境操作", "先给我看修改计划")
+        val dismissAndResume = {
+            val id = target.id
+            denyTarget = null
+            scope.launch { AuditRepository.setApprovalHold(id, paused = false) }
+        }
         AlertDialog(
             containerColor = p.card,
             titleContentColor = p.label,
             textContentColor = p.label,
-            onDismissRequest = { denyTarget = null },
-            title = { Text("拒绝并给 AI 反馈", fontWeight = FontWeight.SemiBold) },
+            onDismissRequest = { dismissAndResume() },
+            title = { Text("拒绝并给 AI 反馈（倒计时已暂停）", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(target.summary, color = p.secondaryLabel, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -242,7 +248,7 @@ fun ApprovalsScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { denyTarget = null }) { Text("取消", color = p.secondaryLabel) }
+                TextButton(onClick = { dismissAndResume() }) { Text("取消", color = p.secondaryLabel) }
             }
         )
     }
@@ -261,13 +267,25 @@ internal fun PendingApprovalCard(
 ) {
     val p = LocalIosPalette.current
     var expanded by remember { mutableStateOf(false) }
+    val isPaused = item.expiresAt == 0L
     val totalMs = (item.expiresAt - item.createdAt).coerceAtLeast(1000L)
-    val leftMs = (item.expiresAt - nowMs).coerceAtLeast(0L)
-    val progress = (leftMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+    val leftMs = if (isPaused) totalMs else (item.expiresAt - nowMs).coerceAtLeast(0L)
+    val progress = if (isPaused) 1f else (leftMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
     val leftSec = ((leftMs + 999L) / 1000L).toInt().coerceAtLeast(0)
-    val accent = if (item.isHighRisk) p.red else if (autoApproveOnTimeout) p.green else p.accent
-    val countdownText = if (autoApproveOnTimeout) "${leftSec}s 自动允许" else "${leftSec}s"
+    val accent = when {
+        isPaused -> p.accent
+        item.isHighRisk -> p.red
+        autoApproveOnTimeout -> p.green
+        else -> p.accent
+    }
+    val countdownText = when {
+        isPaused && item.pausedRemainingSec > 0 -> "已暂停 (${item.pausedRemainingSec}s)"
+        isPaused -> "输入中 · 已暂停"
+        autoApproveOnTimeout -> "${leftSec}s 自动允许"
+        else -> "${leftSec}s"
+    }
     val countdownColor = when {
+        isPaused -> p.accent
         autoApproveOnTimeout && leftSec <= 10 -> p.orange
         autoApproveOnTimeout -> p.green
         leftSec <= 10 -> p.red

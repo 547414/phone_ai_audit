@@ -28,7 +28,8 @@ data class ApprovalItem(
     val decidedBy: String = "",
     val createdAt: Long,
     val expiresAt: Long,
-    val decidedAt: Long
+    val decidedAt: Long,
+    val pausedRemainingSec: Int = 0
 ) {
     val isHighRisk: Boolean get() = riskLevel.equals("high", ignoreCase = true)
     val isPending: Boolean get() = status == "pending"

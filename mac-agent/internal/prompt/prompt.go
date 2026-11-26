@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -22,6 +23,12 @@ type Result struct {
 	Decision  string `json:"decision"`
 	Reason    string `json:"reason"`
 	DecidedBy string `json:"decided_by,omitempty"`
+}
+
+// Control wires bidirectional pause/resume sync between the floating HUD and the daemon.
+type Control struct {
+	OnHold       func(paused bool, remainingSec int)
+	RemoteHoldCh <-chan bool
 }
 
 var (
@@ -74,6 +81,11 @@ func FindBinary() string {
 // Show launches the native macOS floating approval HUD and waits for a local user decision
 // or ctx cancellation (e.g., when the phone approves/denies first).
 func Show(ctx context.Context, a proto.Approval, timeoutSec int, timeoutAction string) (Result, error) {
+	return ShowWithControl(ctx, a, timeoutSec, timeoutAction, Control{})
+}
+
+// ShowWithControl launches the native macOS floating approval HUD with live pause/resume sync.
+func ShowWithControl(ctx context.Context, a proto.Approval, timeoutSec int, timeoutAction string, ctrl Control) (Result, error) {
 	bin := FindBinary()
 	if bin == "" {
 		return Result{}, ErrUnavailable
@@ -104,15 +116,94 @@ func Show(ctx context.Context, a proto.Approval, timeoutSec int, timeoutAction s
 
 	cmd := exec.Command(bin)
 	cmd.Stdin = bytes.NewReader(payload)
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{}, err
+	}
 
 	if err := cmd.Start(); err != nil {
 		return Result{}, err
 	}
 
+	// Forward remote pause/resume signals (e.g. Android opened deny dialog) via SIGUSR1/SIGUSR2.
+	stopSig := make(chan struct{})
+	defer close(stopSig)
+	if ctrl.RemoteHoldCh != nil {
+		go func() {
+			for {
+				select {
+				case <-stopSig:
+					return
+				case <-ctx.Done():
+					return
+				case paused, ok := <-ctrl.RemoteHoldCh:
+					if !ok {
+						return
+					}
+					if cmd.Process != nil {
+						if paused {
+							_ = cmd.Process.Signal(syscall.SIGUSR1)
+						} else {
+							_ = cmd.Process.Signal(syscall.SIGUSR2)
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	var (
+		resMu    sync.Mutex
+		finalRes Result
+		hasRes   bool
+	)
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		sc := bufio.NewScanner(stdoutPipe)
+		sc.Buffer(make([]byte, 0, 16*1024), 256*1024)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			var msg struct {
+				Event        string `json:"event"`
+				RemainingSec int    `json:"remaining_sec"`
+				Decision     string `json:"decision"`
+				Reason       string `json:"reason"`
+				DecidedBy    string `json:"decided_by"`
+			}
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				continue
+			}
+			switch msg.Event {
+			case "pause":
+				if ctrl.OnHold != nil {
+					ctrl.OnHold(true, msg.RemainingSec)
+				}
+			case "resume":
+				if ctrl.OnHold != nil {
+					ctrl.OnHold(false, msg.RemainingSec)
+				}
+			default:
+				if msg.Decision != "" {
+					resMu.Lock()
+					finalRes = Result{
+						Decision:  msg.Decision,
+						Reason:    msg.Reason,
+						DecidedBy: msg.DecidedBy,
+					}
+					hasRes = true
+					resMu.Unlock()
+				}
+			}
+		}
+	}()
+
 	waitCh := make(chan error, 1)
 	go func() {
+		<-readDone
 		waitCh <- cmd.Wait()
 	}()
 
@@ -134,13 +225,12 @@ func Show(ctx context.Context, a proto.Approval, timeoutSec int, timeoutAction s
 		}
 	}
 
-	raw := strings.TrimSpace(stdout.String())
-	if raw == "" {
+	resMu.Lock()
+	res := finalRes
+	ok := hasRes
+	resMu.Unlock()
+	if !ok {
 		return Result{}, errors.New("prompt exited without decision")
-	}
-	var res Result
-	if err := json.Unmarshal([]byte(raw), &res); err != nil {
-		return Result{}, err
 	}
 	switch res.Decision {
 	case "approved", "denied", "fallback":

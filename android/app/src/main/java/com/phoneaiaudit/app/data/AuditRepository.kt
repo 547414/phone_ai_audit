@@ -164,6 +164,13 @@ object AuditRepository {
         _pendingApprovals.value = listOf(item) + cur
     }
 
+    fun onApprovalExpiryUpdated(item: ApprovalItem) {
+        val cur = _pendingApprovals.value
+        if (cur.any { it.id == item.id }) {
+            _pendingApprovals.value = cur.map { if (it.id == item.id) item else it }
+        }
+    }
+
     fun onApprovalUpdated(item: ApprovalItem) {
         val nextPending = _pendingApprovals.value.filterNot { it.id == item.id }
         _pendingApprovals.value = nextPending
@@ -279,6 +286,23 @@ object AuditRepository {
                     val resolved = ApprovalItem.fromJson(JSONObject(body))
                     onApprovalUpdated(resolved)
                     resolved
+                }
+            }
+        }
+
+    suspend fun setApprovalHold(id: String, paused: Boolean): Result<ApprovalItem> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val payload = JSONObject().put("paused", paused)
+                val req = authedRequest("/api/v1/approvals/$id/hold")
+                    .post(payload.toString().toRequestBody(jsonMedia))
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) error("HTTP ${resp.code}: $body")
+                    val updated = ApprovalItem.fromJson(JSONObject(body))
+                    onApprovalExpiryUpdated(updated)
+                    updated
                 }
             }
         }

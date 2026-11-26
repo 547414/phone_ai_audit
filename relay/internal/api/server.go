@@ -58,6 +58,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/approvals", s.requireApp(s.handleListApprovals))
 	s.mux.HandleFunc("GET /api/v1/approvals/{id}", s.requireAny(s.handleGetApproval))
 	s.mux.HandleFunc("POST /api/v1/approvals/{id}/decide", s.requireApp(s.handleDecideApproval))
+	s.mux.HandleFunc("POST /api/v1/approvals/{id}/hold", s.requireAny(s.handleHoldApproval))
 
 	// Messages
 	s.mux.HandleFunc("POST /api/v1/messages", s.requireMac(s.handleCreateMessage))
@@ -258,6 +259,32 @@ func (s *Server) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := s.hub.DecideApproval(r.Context(), id, req.Decision, strings.TrimSpace(req.Reason), req.Scope, "android_app")
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "approval not found")
+			return
+		}
+		if errors.Is(err, store.ErrAlreadyResolved) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "already_resolved", "approval": a})
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (s *Server) handleHoldApproval(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Paused    bool `json:"paused"`
+		ResumeSec int  `json:"resume_sec"`
+	}
+	if err := readJSON(r, &req, 16*1024); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a, err := s.hub.SetApprovalHold(r.Context(), id, req.Paused, req.ResumeSec)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "approval not found")

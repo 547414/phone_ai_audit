@@ -62,6 +62,7 @@ type Daemon struct {
 
 	ackWaiters          map[string]chan proto.Approval
 	decisionWaiters     map[string]chan proto.Approval
+	expiryWaiters       map[string]chan proto.Approval
 	fsStreams           map[string]context.CancelFunc
 	activeHookSessions  map[string]int
 	recentHookFallbacks map[string]time.Time
@@ -89,6 +90,7 @@ func newDaemon(cfg config.Config) *Daemon {
 		},
 		ackWaiters:          make(map[string]chan proto.Approval),
 		decisionWaiters:     make(map[string]chan proto.Approval),
+		expiryWaiters:       make(map[string]chan proto.Approval),
 		fsStreams:           make(map[string]context.CancelFunc),
 		activeHookSessions:  make(map[string]int),
 		recentHookFallbacks: make(map[string]time.Time),
@@ -399,6 +401,18 @@ func (d *Daemon) handleRelayText(ctx context.Context, data []byte) {
 			d.mu.Unlock()
 			if ch != nil {
 				ch <- *env.Approval
+			}
+		}
+	case "approval.expiry_updated":
+		if env.Approval != nil {
+			d.mu.Lock()
+			ch := d.expiryWaiters[env.Approval.ID]
+			d.mu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- *env.Approval:
+				default:
+				}
 			}
 		}
 	case "term.list_req":
@@ -1092,12 +1106,15 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 	}
 
 	decCh := make(chan proto.Approval, 1)
+	expCh := make(chan proto.Approval, 4)
 	d.mu.Lock()
 	d.decisionWaiters[created.ID] = decCh
+	d.expiryWaiters[created.ID] = expCh
 	d.mu.Unlock()
 	defer func() {
 		d.mu.Lock()
 		delete(d.decisionWaiters, created.ID)
+		delete(d.expiryWaiters, created.ID)
 		d.mu.Unlock()
 	}()
 
@@ -1105,7 +1122,13 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 		res prompt.Result
 		err error
 	}
+	type localHoldEvent struct {
+		paused       bool
+		remainingSec int
+	}
 	var macPromptCh chan promptOutcome
+	localHoldCh := make(chan localHoldEvent, 8)
+	remoteHoldCh := make(chan bool, 4)
 	cancelPrompt := func() {}
 	if allowMacPrompt && !idle.Detect().Locked {
 		hudSec := effectiveTimeoutSec
@@ -1122,7 +1145,15 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 		macPromptCh = make(chan promptOutcome, 1)
 		timeoutAction := st.TimeoutAction
 		go func() {
-			r, err := prompt.Show(pCtx, a, hudSec, timeoutAction)
+			r, err := prompt.ShowWithControl(pCtx, a, hudSec, timeoutAction, prompt.Control{
+				OnHold: func(paused bool, remainingSec int) {
+					select {
+					case localHoldCh <- localHoldEvent{paused: paused, remainingSec: remainingSec}:
+					default:
+					}
+				},
+				RemoteHoldCh: remoteHoldCh,
+			})
 			macPromptCh <- promptOutcome{res: r, err: err}
 		}()
 	}
@@ -1130,12 +1161,62 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 
 	timer := time.NewTimer(time.Duration(effectiveTimeoutSec+5) * time.Second)
 	defer timer.Stop()
+	timerCh := timer.C
+
+	stopTimer := func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerCh = nil
+	}
+	resetTimer := func(dur time.Duration) {
+		if dur < 6*time.Second {
+			dur = 6 * time.Second
+		}
+		stopTimer()
+		timer.Reset(dur)
+		timerCh = timer.C
+	}
 
 	for {
 		select {
 		case dec := <-decCh:
 			cancelPrompt()
 			return dec, nil
+		case ev := <-localHoldCh:
+			if ev.paused {
+				stopTimer()
+			} else {
+				remSec := ev.remainingSec
+				if remSec <= 0 {
+					remSec = effectiveTimeoutSec
+				}
+				resetTimer(time.Duration(remSec+5) * time.Second)
+			}
+			d.sendJSON(map[string]any{
+				"type":        "approval.hold",
+				"approval_id": created.ID,
+				"paused":      ev.paused,
+				"resume_sec":  ev.remainingSec,
+			})
+		case exp := <-expCh:
+			if exp.ExpiresAt == 0 {
+				stopTimer()
+				select {
+				case remoteHoldCh <- true:
+				default:
+				}
+			} else {
+				rem := time.Until(time.UnixMilli(exp.ExpiresAt)) + 5*time.Second
+				resetTimer(rem)
+				select {
+				case remoteHoldCh <- false:
+				default:
+				}
+			}
 		case macRes := <-macPromptCh:
 			if macRes.err != nil {
 				macPromptCh = nil
@@ -1165,7 +1246,7 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 				"approval_id": created.ID,
 			})
 			return proto.Approval{ID: created.ID, Status: "canceled"}, ctx.Err()
-		case <-timer.C:
+		case <-timerCh:
 			cancelPrompt()
 			curSt := d.getSettings()
 			switch curSt.TimeoutAction {

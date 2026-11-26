@@ -391,3 +391,106 @@ func TestBothModeStaysPendingWhenPhoneTemporarilyOffline(t *testing.T) {
 		t.Fatalf("expected reconnecting app init frame to include pending approval %s, got %s", created.ID, string(initRaw))
 	}
 }
+
+func TestApprovalHoldPausesExpiryWhileTyping(t *testing.T) {
+	srv, cfg, cleanup := newTestServer(t)
+	defer cleanup()
+
+	appConn, _, err := websocket.DefaultDialer.Dial(
+		wsURL(srv.URL, "/api/v1/ws/app"),
+		http.Header{"Authorization": []string{"Bearer " + cfg.AppToken}},
+	)
+	if err != nil {
+		t.Fatalf("dial app ws: %v", err)
+	}
+	defer appConn.Close()
+	_, _, _ = appConn.ReadMessage() // init
+
+	macConn, _, err := websocket.DefaultDialer.Dial(
+		wsURL(srv.URL, "/api/v1/ws/mac"),
+		http.Header{"Authorization": []string{"Bearer " + cfg.MacToken}},
+	)
+	if err != nil {
+		t.Fatalf("dial mac ws: %v", err)
+	}
+	defer macConn.Close()
+	_, _, _ = macConn.ReadMessage() // settings.updated
+
+	// Create 2s approval
+	resp := doJSON(t, "POST", srv.URL+"/api/v1/approvals", cfg.MacToken, map[string]any{
+		"agent":       "agy",
+		"summary":     "rm -rf dist/tmp",
+		"timeout_sec": 2,
+	})
+	var created model.Approval
+	_ = json.NewDecoder(resp.Body).Decode(&created)
+	_ = resp.Body.Close()
+
+	// Pause via Mac WS (simulating user typing in Mac HUD)
+	if err := macConn.WriteJSON(map[string]any{
+		"type":        "approval.hold",
+		"approval_id": created.ID,
+		"paused":      true,
+	}); err != nil {
+		t.Fatalf("write approval.hold: %v", err)
+	}
+
+	// Verify App WS receives approval.expiry_updated with paused=true and expires_at=0
+	gotPaused := false
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !gotPaused {
+		_ = appConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, raw, err := appConn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read app ws: %v", err)
+		}
+		var env struct {
+			Type     string         `json:"type"`
+			Paused   bool           `json:"paused"`
+			Approval model.Approval `json:"approval"`
+		}
+		if json.Unmarshal(raw, &env) == nil && env.Type == "approval.expiry_updated" && env.Approval.ID == created.ID {
+			if !env.Paused || env.Approval.ExpiresAt != 0 {
+				t.Fatalf("expected paused=true and expires_at=0, got %+v", env)
+			}
+			gotPaused = true
+		}
+	}
+	if !gotPaused {
+		t.Fatal("app did not receive approval.expiry_updated pause event")
+	}
+
+	// Wait 2.5s (past original 2s expiry) -> MUST still be pending (NOT auto-approved!)
+	time.Sleep(2500 * time.Millisecond)
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/approvals/"+created.ID, cfg.AppToken, nil)
+	var stillPending model.Approval
+	_ = json.NewDecoder(resp.Body).Decode(&stillPending)
+	_ = resp.Body.Close()
+	if stillPending.Status != model.StatusPending {
+		t.Fatalf("expected approval to remain pending while paused, got %s", stillPending.Status)
+	}
+
+	// Resume WITHOUT passing resume_sec -> MUST resume from preserved ~2s remaining (NOT reset to 30s default!)
+	resp = doJSON(t, "POST", srv.URL+"/api/v1/approvals/"+created.ID+"/hold", cfg.AppToken, map[string]any{
+		"paused": false,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 resume hold, got %d", resp.StatusCode)
+	}
+	var resumed model.Approval
+	_ = json.NewDecoder(resp.Body).Decode(&resumed)
+	_ = resp.Body.Close()
+	remAfterResume := resumed.ExpiresAt - time.Now().UnixMilli()
+	if remAfterResume <= 0 || remAfterResume > 4000 {
+		t.Fatalf("expected resume from preserved ~2s remaining (not full 30s), got %dms", remAfterResume)
+	}
+
+	time.Sleep(3200 * time.Millisecond)
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/approvals/"+created.ID, cfg.AppToken, nil)
+	var afterResume model.Approval
+	_ = json.NewDecoder(resp.Body).Decode(&afterResume)
+	_ = resp.Body.Close()
+	if afterResume.Status != model.StatusApproved {
+		t.Fatalf("expected auto-approved after resuming from preserved seconds, got %s", afterResume.Status)
+	}
+}

@@ -56,6 +56,34 @@ func TestPromptDecisionAndContextCancellation(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Fatalf("expected prompt process to terminate promptly on cancel, took %s", elapsed)
 	}
+
+	// 3. Mock prompt emitting live pause/resume events with remaining_sec before final decision
+	pauseBin := filepath.Join(dir, "mock-prompt-pause")
+	pauseScript := "#!/bin/sh\ncat >/dev/null\necho '{\"event\":\"pause\",\"remaining_sec\":11}'\nsleep 0.05\necho '{\"event\":\"resume\",\"remaining_sec\":11}'\necho '{\"decision\":\"denied\",\"reason\":\"等等\",\"decided_by\":\"mac_local\"}'\n"
+	if err := os.WriteFile(pauseBin, []byte(pauseScript), 0o755); err != nil {
+		t.Fatalf("write pause script: %v", err)
+	}
+	t.Setenv("AI_AUDIT_PROMPT_BIN", pauseBin)
+
+	type holdEv struct {
+		paused bool
+		rem    int
+	}
+	var holdEvents []holdEv
+	res3, err := ShowWithControl(context.Background(), proto.Approval{Agent: "agy", Summary: "rm -rf /tmp/x"}, 15, "approve", Control{
+		OnHold: func(paused bool, remainingSec int) {
+			holdEvents = append(holdEvents, holdEv{paused: paused, rem: remainingSec})
+		},
+	})
+	if err != nil {
+		t.Fatalf("ShowWithControl failed: %v", err)
+	}
+	if res3.Decision != "denied" || res3.Reason != "等等" {
+		t.Fatalf("unexpected pause result: %+v", res3)
+	}
+	if len(holdEvents) != 2 || !holdEvents[0].paused || holdEvents[0].rem != 11 || holdEvents[1].paused || holdEvents[1].rem != 11 {
+		t.Fatalf("expected [{true 11}, {false 11}] hold events, got %+v", holdEvents)
+	}
 }
 
 func containsSubstr(s, sub string) bool {

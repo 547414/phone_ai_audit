@@ -249,6 +249,7 @@ fun MessagesScreen(
                             onDeny = {
                                 denyReason = ""
                                 denyTarget = item
+                                scope.launch { AuditRepository.setApprovalHold(item.id, paused = true) }
                             },
                             onFallback = { submitDecision(item, "fallback", "手机端选择退回电脑处理") },
                             onOpenTerminal = {
@@ -354,12 +355,17 @@ fun MessagesScreen(
     // Deny reason dialog
     denyTarget?.let { target ->
         val presets = listOf("先不要执行，换个更安全方案", "请改在测试环境操作", "先给我看修改计划")
+        val dismissAndResume = {
+            val id = target.id
+            denyTarget = null
+            scope.launch { AuditRepository.setApprovalHold(id, paused = false) }
+        }
         AlertDialog(
             containerColor = p.card,
             titleContentColor = p.label,
             textContentColor = p.label,
-            onDismissRequest = { denyTarget = null },
-            title = { Text("拒绝并给 AI 反馈", fontWeight = FontWeight.SemiBold) },
+            onDismissRequest = { dismissAndResume() },
+            title = { Text("拒绝并给 AI 反馈（倒计时已暂停）", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(target.summary, color = p.secondaryLabel, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -394,7 +400,7 @@ fun MessagesScreen(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { denyTarget = null }) { Text("取消", color = p.secondaryLabel) }
+                TextButton(onClick = { dismissAndResume() }) { Text("取消", color = p.secondaryLabel) }
             }
         )
     }
