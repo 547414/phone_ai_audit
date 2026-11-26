@@ -1,7 +1,9 @@
 package com.phoneaiaudit.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phoneaiaudit.app.data.AuditRepository
+import com.phoneaiaudit.app.data.UsageAccountItem
 import com.phoneaiaudit.app.data.UsageAgentItem
 import com.phoneaiaudit.app.data.UsageDailyPoint
 import com.phoneaiaudit.app.data.UsageQuotaWindow
@@ -298,12 +302,26 @@ private fun KpiTile(
 private fun AgentUsageCard(agent: UsageAgentItem, nowMs: Long) {
     val p = LocalIosPalette.current
     var expanded by remember(agent.agent) { mutableStateOf(false) }
+    var selectedAccountKey by remember(agent.agent) { mutableStateOf("all") }
     val agentColor = when (agent.agent.lowercase()) {
         "claude" -> ClaudeColor
         "codex" -> CodexColor
         "agy" -> AgyColor
         else -> p.accent
     }
+    val multiAcct = agent.accounts.size >= 2
+    val singleAcct = if (agent.accounts.size == 1) agent.accounts.first() else null
+    val activeFilterKey = if (multiAcct && selectedAccountKey != "all" && agent.accounts.any { it.account == selectedAccountKey }) {
+        selectedAccountKey
+    } else {
+        "all"
+    }
+    val filteredAcct = if (multiAcct && activeFilterKey != "all") {
+        agent.accounts.firstOrNull { it.account == activeFilterKey }
+    } else {
+        null
+    }
+    val visibleModels = filteredAcct?.models ?: agent.models
 
     IosSection {
         Column(
@@ -318,14 +336,17 @@ private fun AgentUsageCard(agent: UsageAgentItem, nowMs: Long) {
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
                     Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(agentColor))
                     Text(
                         text = agent.displayName,
                         color = p.label,
                         fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (agent.planType.isNotBlank()) {
                         IosPillBadge(text = agent.planType.uppercase(), color = agentColor)
@@ -338,20 +359,53 @@ private fun AgentUsageCard(agent: UsageAgentItem, nowMs: Long) {
                 )
             }
 
-            // 5h & Weekly Quota Windows
-            QuotaWindowBox(label = "5 小时滚动窗口", window = agent.window5h, accent = agentColor, nowMs = nowMs)
-            QuotaWindowBox(label = "周配额窗口", window = agent.windowWeekly, accent = agentColor, nowMs = nowMs)
+            if (singleAcct != null && singleAcct.account.isNotBlank() && singleAcct.account != "default") {
+                Text(
+                    text = "账号：${singleAcct.label}",
+                    color = p.secondaryLabel,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (singleAcct != null && singleAcct.authExpireNote.isNotBlank()) {
+                AuthExpiryBanner(acc = singleAcct)
+            }
 
-            // 4-cell breakdown
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MiniStatCell("今日", formatTokenCount(agent.today.totalTokens), Modifier.weight(1f))
-                MiniStatCell("本周", formatTokenCount(agent.week.totalTokens), Modifier.weight(1f))
-                MiniStatCell("本月", formatTokenCount(agent.month.totalTokens), Modifier.weight(1f))
-                MiniStatCell("总计", formatTokenCount(agent.total.totalTokens), Modifier.weight(1f))
+            if (multiAcct) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    agent.accounts.forEach { acc ->
+                        AccountQuotaPanel(acc = acc, accent = agentColor, nowMs = nowMs)
+                    }
+                }
+                Text(
+                    text = "全部账号汇总",
+                    color = p.secondaryLabel,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MiniStatCell("今日", formatTokenCount(agent.today.totalTokens), Modifier.weight(1f))
+                    MiniStatCell("本周", formatTokenCount(agent.week.totalTokens), Modifier.weight(1f))
+                    MiniStatCell("本月", formatTokenCount(agent.month.totalTokens), Modifier.weight(1f))
+                    MiniStatCell("总计", formatTokenCount(agent.total.totalTokens), Modifier.weight(1f))
+                }
+            } else {
+                // 5h & Weekly Quota Windows
+                QuotaWindowBox(label = "5 小时滚动窗口", window = agent.window5h, accent = agentColor, nowMs = nowMs)
+                QuotaWindowBox(label = "周配额窗口", window = agent.windowWeekly, accent = agentColor, nowMs = nowMs)
+
+                // 4-cell breakdown
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MiniStatCell("今日", formatTokenCount(agent.today.totalTokens), Modifier.weight(1f))
+                    MiniStatCell("本周", formatTokenCount(agent.week.totalTokens), Modifier.weight(1f))
+                    MiniStatCell("本月", formatTokenCount(agent.month.totalTokens), Modifier.weight(1f))
+                    MiniStatCell("总计", formatTokenCount(agent.total.totalTokens), Modifier.weight(1f))
+                }
             }
 
             // Expandable per-model breakdown
-            if (agent.models.isNotEmpty()) {
+            if (agent.models.isNotEmpty() || multiAcct) {
                 IosDivider(startIndent = 0.dp)
                 Row(
                     modifier = Modifier
@@ -361,8 +415,13 @@ private fun AgentUsageCard(agent: UsageAgentItem, nowMs: Long) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val headerText = if (filteredAcct != null) {
+                        "模型明细（${visibleModels.size} 个）· 日志 ${filteredAcct.logFiles} 个"
+                    } else {
+                        "模型明细（${visibleModels.size} 个）· 日志 ${agent.logFiles} 个 (${formatFileSize(agent.logBytes)})"
+                    }
                     Text(
-                        text = "模型明细（${agent.models.size} 个）· 日志 ${agent.logFiles} 个 (${formatFileSize(agent.logBytes)})",
+                        text = headerText,
                         color = p.secondaryLabel,
                         fontSize = 12.sp,
                         maxLines = 1,
@@ -378,48 +437,80 @@ private fun AgentUsageCard(agent: UsageAgentItem, nowMs: Long) {
                 }
 
                 if (expanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Text("模型", color = p.tertiaryLabel, fontSize = 11.sp, modifier = Modifier.weight(1.9f))
-                            Text("今日", color = p.tertiaryLabel, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(0.8f))
-                            Text("本周", color = p.tertiaryLabel, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(0.8f))
-                            Text("总计", color = p.tertiaryLabel, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(0.9f))
+                    if (multiAcct) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            AccountFilterChip(
+                                text = "全部账号",
+                                selected = activeFilterKey == "all",
+                                accent = agentColor,
+                                onClick = { selectedAccountKey = "all" }
+                            )
+                            agent.accounts.forEach { acc ->
+                                AccountFilterChip(
+                                    text = shortAccountLabel(acc.label),
+                                    selected = activeFilterKey == acc.account,
+                                    accent = agentColor,
+                                    onClick = { selectedAccountKey = acc.account }
+                                )
+                            }
                         }
-                        agent.models.take(6).forEach { m ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = m.model,
-                                    color = p.label,
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1.9f)
-                                )
-                                Text(
-                                    text = formatTokenCount(m.today.totalTokens),
-                                    color = p.secondaryLabel,
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.weight(0.8f)
-                                )
-                                Text(
-                                    text = formatTokenCount(m.week.totalTokens),
-                                    color = p.secondaryLabel,
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.weight(0.8f)
-                                )
-                                Text(
-                                    text = formatTokenCount(m.total.totalTokens),
-                                    color = p.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.weight(0.9f)
-                                )
+                    }
+
+                    if (visibleModels.isEmpty()) {
+                        Text(
+                            text = "该账号暂无已归属的模型记录（新对话或重新打开会话后自动归属）",
+                            color = p.tertiaryLabel,
+                            fontSize = 11.5.sp
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Text("模型", color = p.tertiaryLabel, fontSize = 11.sp, modifier = Modifier.weight(1.9f))
+                                Text("今日", color = p.tertiaryLabel, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(0.8f))
+                                Text("本周", color = p.tertiaryLabel, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(0.8f))
+                                Text("总计", color = p.tertiaryLabel, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(0.9f))
+                            }
+                            visibleModels.take(6).forEach { m ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = m.model,
+                                        color = p.label,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1.9f)
+                                    )
+                                    Text(
+                                        text = formatTokenCount(m.today.totalTokens),
+                                        color = p.secondaryLabel,
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.End,
+                                        modifier = Modifier.weight(0.8f)
+                                    )
+                                    Text(
+                                        text = formatTokenCount(m.week.totalTokens),
+                                        color = p.secondaryLabel,
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.End,
+                                        modifier = Modifier.weight(0.8f)
+                                    )
+                                    Text(
+                                        text = formatTokenCount(m.total.totalTokens),
+                                        color = p.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textAlign = TextAlign.End,
+                                        modifier = Modifier.weight(0.9f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -444,6 +535,130 @@ private fun AgentUsageCard(agent: UsageAgentItem, nowMs: Long) {
 }
 
 @Composable
+private fun AccountQuotaPanel(
+    acc: UsageAccountItem,
+    accent: Color,
+    nowMs: Long
+) {
+    val p = LocalIosPalette.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(p.secondaryFill.copy(alpha = if (p.isDark) 0.35f else 0.3f))
+            .border(0.5.dp, p.separator.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = acc.label,
+                    color = p.label,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (acc.planType.isNotBlank()) {
+                    IosPillBadge(text = acc.planType.uppercase(), color = accent)
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = formatRelativeTime(maxOf(acc.lastActiveAt, acc.observedAt), nowMs),
+                color = p.secondaryLabel,
+                fontSize = 11.sp
+            )
+        }
+
+        if (acc.authExpireNote.isNotBlank()) {
+            AuthExpiryBanner(acc = acc)
+        }
+
+        QuotaWindowBox(label = "5 小时滚动窗口", window = acc.window5h, accent = accent, nowMs = nowMs)
+        QuotaWindowBox(label = "周配额窗口", window = acc.windowWeekly, accent = accent, nowMs = nowMs)
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            MiniStatCell("今日", formatTokenCount(acc.today.totalTokens), Modifier.weight(1f))
+            MiniStatCell("本周", formatTokenCount(acc.week.totalTokens), Modifier.weight(1f))
+            MiniStatCell("本月", formatTokenCount(acc.month.totalTokens), Modifier.weight(1f))
+            MiniStatCell("总计", formatTokenCount(acc.total.totalTokens), Modifier.weight(1f))
+        }
+
+        if (acc.extraNote.isNotBlank()) {
+            Text(
+                text = acc.extraNote,
+                color = p.tertiaryLabel,
+                fontSize = 11.sp,
+                lineHeight = 14.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun AuthExpiryBanner(acc: UsageAccountItem) {
+    val p = LocalIosPalette.current
+    val (bg, fg, prefix) = when {
+        acc.authExpired -> Triple(p.red.copy(alpha = 0.14f), p.red, "✖ ")
+        acc.authExpiringSoon -> Triple(p.orange.copy(alpha = 0.16f), p.orange, "⚠ ")
+        else -> Triple(p.secondaryFill.copy(alpha = if (p.isDark) 0.45f else 0.4f), p.secondaryLabel, "🔑 ")
+    }
+    Text(
+        text = prefix + acc.authExpireNote,
+        color = fg,
+        fontSize = 11.5.sp,
+        fontWeight = if (acc.authExpired || acc.authExpiringSoon) FontWeight.Medium else FontWeight.Normal,
+        lineHeight = 15.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+private fun AccountFilterChip(
+    text: String,
+    selected: Boolean,
+    accent: Color,
+    onClick: () -> Unit
+) {
+    val p = LocalIosPalette.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) accent.copy(alpha = 0.16f) else p.secondaryFill.copy(alpha = 0.55f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = text,
+            color = if (selected) accent else p.secondaryLabel,
+            fontSize = 11.5.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1
+        )
+    }
+}
+
+private fun shortAccountLabel(label: String): String {
+    val idx = label.indexOf('@')
+    return if (idx > 0 && label.length > 18) label.substring(0, idx) else label
+}
+
+@Composable
 private fun QuotaWindowBox(
     label: String,
     window: UsageQuotaWindow,
@@ -462,7 +677,7 @@ private fun QuotaWindowBox(
         window.source == "official" && window.expired -> "已重置 (0%)"
         pct != null -> {
             val left = (100.0 - pct).coerceAtLeast(0.0)
-            String.format(Locale.US, "已用 %.0f%% · 剩 %.0f%%", pct, left)
+            String.format(Locale.US, "已用 %.1f%% · 剩 %.1f%%", pct, left)
         }
         else -> "${formatTokenCount(window.tokens.totalTokens)} tok"
     }

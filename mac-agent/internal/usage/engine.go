@@ -20,7 +20,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-const cacheSchemaVersion = 3
+const cacheSchemaVersion = 4
 
 type bucket5m struct {
 	SlotStartMs int64      `json:"s"`
@@ -31,6 +31,7 @@ type bucket5m struct {
 
 type fileCursor struct {
 	Agent        string                `json:"agent"`
+	Account      string                `json:"account,omitempty"`
 	Size         int64                 `json:"size"`
 	ModUnixNano  int64                 `json:"mod_ns"`
 	Offset       int64                 `json:"offset"`
@@ -40,6 +41,14 @@ type fileCursor struct {
 	MaxStepIndex int                   `json:"max_step,omitempty"`
 	SeenReqOrder []string              `json:"seen_req_order,omitempty"`
 	SeenReq      map[string]TokenStats `json:"seen_req,omitempty"`
+}
+
+type cachedAgyAccount struct {
+	Account   string                 `json:"account"`
+	Label     string                 `json:"label"`
+	ModelName string                 `json:"model_name,omitempty"`
+	Quota     *officialQuotaSnapshot `json:"quota,omitempty"`
+	ExtraNote string                 `json:"extra_note,omitempty"`
 }
 
 type claudeStatsSnapshot struct {
@@ -53,18 +62,23 @@ type claudeStatsSnapshot struct {
 }
 
 type persistentCache struct {
-	Version        int                                       `json:"version"`
-	Days           map[string]map[string]map[string]TokenStats `json:"days"`                      // date(YYYY-MM-DD local) -> agent -> model -> TokenStats
-	ClaudeRawDays  map[string]map[string]TokenStats          `json:"claude_raw_days,omitempty"` // date(YYYY-MM-DD UTC) -> model -> raw un-deduped TokenStats
-	ClaudeStats    *claudeStatsSnapshot                      `json:"claude_stats,omitempty"`
-	Recent5m       map[string]map[string]*bucket5m            `json:"recent_5m"`                 // agent -> key(slot|model) -> bucket5m (last 8 days)
-	Files          map[string]*fileCursor                     `json:"files"`                     // canonicalPath -> cursor
-	LastActive     map[string]int64                           `json:"last_active"`               // agent -> unix ms
-	CodexRateLimit *officialQuotaSnapshot                     `json:"codex_rl,omitempty"`
-	AgyQuota       *officialQuotaSnapshot                     `json:"agy_quota,omitempty"`
-	AgyQuotaExtra  string                                     `json:"agy_quota_extra,omitempty"`
-	AgyQuotaModNs  int64                                      `json:"agy_quota_mod_ns,omitempty"`
-	AgyQuotaSize   int64                                      `json:"agy_quota_size,omitempty"`
+	Version           int                                                  `json:"version"`
+	Days              map[string]map[string]map[string]TokenStats          `json:"days"`                          // date(YYYY-MM-DD local) -> agent -> model -> TokenStats
+	AccountDays       map[string]map[string]map[string]map[string]TokenStats `json:"account_days,omitempty"`      // date(YYYY-MM-DD local) -> agent -> account -> model -> TokenStats
+	ClaudeRawDays     map[string]map[string]TokenStats                     `json:"claude_raw_days,omitempty"`     // date(YYYY-MM-DD UTC) -> model -> raw un-deduped TokenStats
+	ClaudeStats       *claudeStatsSnapshot                                 `json:"claude_stats,omitempty"`
+	Recent5m          map[string]map[string]*bucket5m                      `json:"recent_5m"`                     // agent -> key(slot|model) -> bucket5m (last 8 days)
+	AccountRecent5m   map[string]map[string]map[string]*bucket5m           `json:"account_recent_5m,omitempty"`   // agent -> account -> key(slot|model) -> bucket5m (last 8 days)
+	Files             map[string]*fileCursor                               `json:"files"`                         // canonicalPath -> cursor
+	LastActive        map[string]int64                                     `json:"last_active"`                   // agent -> unix ms
+	AccountLastActive map[string]map[string]int64                          `json:"account_last_active,omitempty"` // agent -> account -> unix ms
+	CodexRateLimit    *officialQuotaSnapshot                               `json:"codex_rl,omitempty"`
+	AgyQuota          *officialQuotaSnapshot                               `json:"agy_quota,omitempty"`
+	AgyQuotaExtra     string                                               `json:"agy_quota_extra,omitempty"`
+	AgyAccounts       map[string]*cachedAgyAccount                         `json:"agy_accounts,omitempty"`
+	AgyConvAccount    map[string]string                                    `json:"agy_conv_account,omitempty"`
+	AgyQuotaModNs     int64                                                `json:"agy_quota_mod_ns,omitempty"`
+	AgyQuotaSize      int64                                                `json:"agy_quota_size,omitempty"`
 }
 
 type Engine struct {
@@ -105,6 +119,9 @@ func New(opts Options) *Engine {
 	}
 	if opts.AgyQuotaPath == "" && opts.CachePath != "" {
 		opts.AgyQuotaPath = filepath.Join(filepath.Dir(opts.CachePath), "agy-quota.json")
+	}
+	if opts.AgyProfilesPath == "" && opts.CachePath != "" {
+		opts.AgyProfilesPath = filepath.Join(filepath.Dir(opts.CachePath), "agy-profiles.json")
 	}
 	if opts.Hostname == "" {
 		opts.Hostname, _ = os.Hostname()
@@ -201,12 +218,17 @@ func (e *Engine) Snapshot(ctx context.Context, force bool) (Summary, error) {
 
 func newEmptyCache() *persistentCache {
 	return &persistentCache{
-		Version:       cacheSchemaVersion,
-		Days:          make(map[string]map[string]map[string]TokenStats),
-		ClaudeRawDays: make(map[string]map[string]TokenStats),
-		Recent5m:      make(map[string]map[string]*bucket5m),
-		Files:         make(map[string]*fileCursor),
-		LastActive:    make(map[string]int64),
+		Version:           cacheSchemaVersion,
+		Days:              make(map[string]map[string]map[string]TokenStats),
+		AccountDays:       make(map[string]map[string]map[string]map[string]TokenStats),
+		ClaudeRawDays:     make(map[string]map[string]TokenStats),
+		Recent5m:          make(map[string]map[string]*bucket5m),
+		AccountRecent5m:   make(map[string]map[string]map[string]*bucket5m),
+		Files:             make(map[string]*fileCursor),
+		LastActive:        make(map[string]int64),
+		AccountLastActive: make(map[string]map[string]int64),
+		AgyAccounts:       make(map[string]*cachedAgyAccount),
+		AgyConvAccount:    make(map[string]string),
 	}
 }
 
@@ -218,11 +240,19 @@ func (e *Engine) loadCacheLocked() {
 		return
 	}
 	var c persistentCache
-	if err := json.Unmarshal(b, &c); err != nil || c.Version != cacheSchemaVersion {
+	// Migrate v3 caches in-place so archived totals survive log rotation.
+	if err := json.Unmarshal(b, &c); err != nil || (c.Version != 3 && c.Version != cacheSchemaVersion) {
 		return
+	}
+	if c.Version != cacheSchemaVersion {
+		c.Version = cacheSchemaVersion
+		e.dirty = true
 	}
 	if c.Days == nil {
 		c.Days = make(map[string]map[string]map[string]TokenStats)
+	}
+	if c.AccountDays == nil {
+		c.AccountDays = make(map[string]map[string]map[string]map[string]TokenStats)
 	}
 	if c.ClaudeRawDays == nil {
 		c.ClaudeRawDays = make(map[string]map[string]TokenStats)
@@ -230,11 +260,23 @@ func (e *Engine) loadCacheLocked() {
 	if c.Recent5m == nil {
 		c.Recent5m = make(map[string]map[string]*bucket5m)
 	}
+	if c.AccountRecent5m == nil {
+		c.AccountRecent5m = make(map[string]map[string]map[string]*bucket5m)
+	}
 	if c.Files == nil {
 		c.Files = make(map[string]*fileCursor)
 	}
 	if c.LastActive == nil {
 		c.LastActive = make(map[string]int64)
+	}
+	if c.AccountLastActive == nil {
+		c.AccountLastActive = make(map[string]map[string]int64)
+	}
+	if c.AgyAccounts == nil {
+		c.AgyAccounts = make(map[string]*cachedAgyAccount)
+	}
+	if c.AgyConvAccount == nil {
+		c.AgyConvAccount = make(map[string]string)
 	}
 	e.cache = &c
 }
@@ -258,22 +300,25 @@ func (e *Engine) saveCacheLocked() {
 }
 
 type scanCounters struct {
-	filesTotal    int
-	filesScanned  int
-	filesCached   int
-	codexZstFiles int
-	agentFiles    map[string]int
-	agentScanned  map[string]int
-	agentBytes    map[string]int64
-	installed     map[string]bool
+	filesTotal           int
+	filesScanned         int
+	filesCached          int
+	codexZstFiles        int
+	agentFiles           map[string]int
+	agentScanned         map[string]int
+	agentBytes           map[string]int64
+	installed            map[string]bool
+	agyAccountFiles      map[string]int
+	agyUnattributedFiles int
 }
 
 func (e *Engine) scanAllLocked(now time.Time) scanCounters {
 	sc := scanCounters{
-		agentFiles:   make(map[string]int),
-		agentScanned: make(map[string]int),
-		agentBytes:   make(map[string]int64),
-		installed:    make(map[string]bool),
+		agentFiles:      make(map[string]int),
+		agentScanned:    make(map[string]int),
+		agentBytes:      make(map[string]int64),
+		installed:       make(map[string]bool),
+		agyAccountFiles: make(map[string]int),
 	}
 
 	e.scanDirLocked("claude", e.opts.ClaudeDir, func(name string) bool {
@@ -283,12 +328,21 @@ func (e *Engine) scanAllLocked(now time.Time) scanCounters {
 
 	e.scanCodexDirLocked(e.opts.CodexDir, &sc)
 
-	e.scanDirLocked("agy", e.opts.AgyDir, func(name string) bool {
-		return name == "transcript.jsonl"
-	}, &sc)
+	// Load Antigravity statusLine per-account quota & conversation->account mappings BEFORE
+	// scanning transcripts so active & newly-mapped conversations attribute cleanly on this pass.
 	e.syncAgyQuotaLocked()
+	e.scanAgyDirLocked(e.opts.AgyDir, &sc)
 
 	return sc
+}
+
+func hasRealCachedAgyAccounts(m map[string]*cachedAgyAccount) bool {
+	for k := range m {
+		if k != "" && k != agyDefaultAccountKey {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) syncAgyQuotaLocked() {
@@ -301,7 +355,7 @@ func (e *Engine) syncAgyQuotaLocked() {
 	}
 	modNs := fi.ModTime().UnixNano()
 	size := fi.Size()
-	if e.cache.AgyQuota != nil && e.cache.AgyQuotaModNs == modNs && e.cache.AgyQuotaSize == size {
+	if len(e.cache.AgyAccounts) > 0 && e.cache.AgyQuotaModNs == modNs && e.cache.AgyQuotaSize == size {
 		return
 	}
 	b, err := os.ReadFile(e.opts.AgyQuotaPath)
@@ -312,15 +366,234 @@ func (e *Engine) syncAgyQuotaLocked() {
 	if err := json.Unmarshal(b, &qf); err != nil {
 		return
 	}
-	snap, extra := convertAgyQuotaFile(&qf)
-	if snap == nil {
-		return
+	accts, convs := convertAgyQuotaFile(&qf)
+
+	if e.cache.AgyConvAccount == nil {
+		e.cache.AgyConvAccount = make(map[string]string)
 	}
-	e.cache.AgyQuota = snap
-	e.cache.AgyQuotaExtra = extra
+	for cid, acct := range convs {
+		if e.cache.AgyConvAccount[cid] != acct {
+			e.cache.AgyConvAccount[cid] = acct
+			e.dirty = true
+		}
+	}
+
+	if len(accts) > 0 {
+		if e.cache.AgyAccounts == nil {
+			e.cache.AgyAccounts = make(map[string]*cachedAgyAccount)
+		}
+		if hasRealCachedAgyAccounts(accts) {
+			delete(e.cache.AgyAccounts, agyDefaultAccountKey)
+		}
+		for k, v := range accts {
+			if k == agyDefaultAccountKey && hasRealCachedAgyAccounts(e.cache.AgyAccounts) {
+				continue
+			}
+			e.cache.AgyAccounts[k] = v
+		}
+
+		// Keep legacy single-account fields populated with the most recently observed account.
+		var newest *cachedAgyAccount
+		for _, v := range e.cache.AgyAccounts {
+			if v == nil || v.Quota == nil {
+				continue
+			}
+			if newest == nil || v.Quota.ObservedAt > newest.Quota.ObservedAt ||
+				(v.Quota.ObservedAt == newest.Quota.ObservedAt && v.Account < newest.Account) {
+				newest = v
+			}
+		}
+		if newest != nil {
+			e.cache.AgyQuota = newest.Quota
+			e.cache.AgyQuotaExtra = newest.ExtraNote
+		}
+	}
+
 	e.cache.AgyQuotaModNs = modNs
 	e.cache.AgyQuotaSize = size
 	e.dirty = true
+}
+
+type agyTranscriptEntry struct {
+	path   string
+	convID string
+	size   int64
+	modNs  int64
+}
+
+func (e *Engine) scanAgyDirLocked(root string, sc *scanCounters) {
+	if root == "" {
+		return
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	sc.installed["agy"] = true
+
+	var entries []agyTranscriptEntry
+	childToParent := make(map[string]string)
+
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return nil
+		}
+		slashRel := filepath.ToSlash(rel)
+		parts := strings.Split(slashRel, "/")
+		convID := ""
+		if len(parts) >= 2 {
+			convID = parts[0]
+		}
+
+		name := d.Name()
+		// Link child subagent conversation IDs to their parent conversation so subagent tokens
+		// inherit the parent conversation's signed-in Antigravity account.
+		if convID != "" && strings.HasSuffix(name, ".json") && len(parts) >= 3 && parts[len(parts)-2] == "subagents" {
+			childID := strings.TrimSuffix(name, ".json")
+			if childID != "" && childID != convID {
+				childToParent[childID] = convID
+			}
+			return nil
+		}
+		if name != "transcript.jsonl" {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		entries = append(entries, agyTranscriptEntry{
+			path:   path,
+			convID: convID,
+			size:   fi.Size(),
+			modNs:  fi.ModTime().UnixNano(),
+		})
+		return nil
+	})
+
+	// Propagate account mappings from parent conversations to subagent conversations.
+	for pass := 0; pass < 5; pass++ {
+		changed := false
+		for childID, parentID := range childToParent {
+			if e.cache.AgyConvAccount[childID] != "" {
+				continue
+			}
+			if parentAcct := e.cache.AgyConvAccount[parentID]; parentAcct != "" {
+				e.cache.AgyConvAccount[childID] = parentAcct
+				e.dirty = true
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].path < entries[j].path
+	})
+
+	for _, ent := range entries {
+		sc.filesTotal++
+		sc.agentFiles["agy"]++
+		sc.agentBytes["agy"] += ent.size
+
+		mappedAcct := ""
+		if ent.convID != "" {
+			mappedAcct = e.cache.AgyConvAccount[ent.convID]
+		}
+
+		cur, ok := e.cache.Files[ent.path]
+		effAcct := mappedAcct
+		if effAcct == "" && ok {
+			effAcct = cur.Account
+		}
+		if effAcct != "" {
+			sc.agyAccountFiles[effAcct]++
+		} else {
+			sc.agyUnattributedFiles++
+		}
+
+		if ok && cur.Size == ent.size && cur.ModUnixNano == ent.modNs {
+			if cur.Account == "" && mappedAcct != "" {
+				if e.backfillAgyAccountFileLocked(ent.path, mappedAcct, cur.MaxStepIndex) {
+					cur.Account = mappedAcct
+					sc.filesScanned++
+					sc.agentScanned["agy"]++
+					e.dirty = true
+					continue
+				}
+			} else if mappedAcct != "" && cur.Account != mappedAcct {
+				cur.Account = mappedAcct
+				e.dirty = true
+			}
+			sc.filesCached++
+			continue
+		}
+
+		if !ok {
+			cur = &fileCursor{Agent: "agy", Account: mappedAcct, MaxStepIndex: -1}
+			e.cache.Files[ent.path] = cur
+		} else if ent.size < cur.Offset {
+			cur.Offset = 0
+			cur.PrevTotal = TokenStats{}
+			cur.MaxStepIndex = -1
+			if mappedAcct != "" {
+				cur.Account = mappedAcct
+			}
+		} else if cur.Account == "" && mappedAcct != "" {
+			// Retroactively attribute previously scanned steps before scanning new appended bytes.
+			_ = e.backfillAgyAccountFileLocked(ent.path, mappedAcct, cur.MaxStepIndex)
+			cur.Account = mappedAcct
+		} else if mappedAcct != "" && cur.Account != mappedAcct {
+			// Account switched mid-conversation: only new appended steps go to the new account.
+			cur.Account = mappedAcct
+		}
+
+		if e.scanFileLocked("agy", ent.path, cur) {
+			sc.filesScanned++
+			sc.agentScanned["agy"]++
+			cur.Size = ent.size
+			cur.ModUnixNano = ent.modNs
+			e.dirty = true
+		}
+	}
+}
+
+// backfillAgyAccountFileLocked scans an already-indexed Antigravity transcript (up through maxStepIndex)
+// and records its turns ONLY into per-account buckets so aggregate Days/Recent5m are never double-counted.
+func (e *Engine) backfillAgyAccountFileLocked(path, account string, maxStepIndex int) bool {
+	if account == "" {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	reader := bufio.NewReaderSize(f, 256*1024)
+	tmpCur := &fileCursor{Agent: "agy", Account: account, MaxStepIndex: -1}
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			if errors.Is(err, io.EOF) && line[len(line)-1] != '\n' {
+				break
+			}
+			trimmed := bytes.TrimSpace(line)
+			if len(trimmed) > 0 {
+				e.parseAgyLineWithModeLocked(trimmed, tmpCur, true, maxStepIndex)
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return true
 }
 
 func (e *Engine) scanDirLocked(agent, root string, match func(base string) bool, sc *scanCounters) {
@@ -915,6 +1188,10 @@ func (e *Engine) parseCodexLineLocked(line []byte, cur *fileCursor) {
 }
 
 func (e *Engine) parseAgyLineLocked(line []byte, cur *fileCursor) {
+	e.parseAgyLineWithModeLocked(line, cur, false, -1)
+}
+
+func (e *Engine) parseAgyLineWithModeLocked(line []byte, cur *fileCursor, accountOnly bool, maxStepLimit int) {
 	if !bytes.Contains(line, []byte(`"input_tokens"`)) &&
 		!bytes.Contains(line, []byte(`"cache_read_tokens"`)) &&
 		!bytes.Contains(line, []byte(`"output_tokens"`)) {
@@ -933,6 +1210,9 @@ func (e *Engine) parseAgyLineLocked(line []byte, cur *fileCursor) {
 		return
 	}
 	if entry.Type != "PLANNER_RESPONSE" && entry.Type != "CHECKPOINT" {
+		return
+	}
+	if maxStepLimit >= 0 && entry.StepIndex > maxStepLimit {
 		return
 	}
 	if entry.StepIndex <= cur.MaxStepIndex {
@@ -960,13 +1240,80 @@ func (e *Engine) parseAgyLineLocked(line []byte, cur *fileCursor) {
 	if tsMs == 0 {
 		return
 	}
-	e.recordEventLocked("agy", model, tsMs, TokenStats{
+	stats := TokenStats{
 		InputTokens:     inTok,
 		CacheReadTokens: cacheRead,
 		OutputTokens:    outTok,
 		TotalTokens:     total,
 		Requests:        1,
-	})
+	}
+	if !accountOnly {
+		e.recordEventLocked("agy", model, tsMs, stats)
+	}
+	if cur.Account != "" {
+		e.recordAccountEventLocked("agy", cur.Account, model, tsMs, stats)
+	}
+}
+
+func (e *Engine) recordAccountEventLocked(agent, account, model string, tsMs int64, delta TokenStats) {
+	if account == "" || delta.IsZero() {
+		return
+	}
+	t := time.UnixMilli(tsMs).In(time.Local)
+	dateKey := t.Format("2006-01-02")
+
+	if e.cache.AccountDays == nil {
+		e.cache.AccountDays = make(map[string]map[string]map[string]map[string]TokenStats)
+	}
+	if e.cache.AccountDays[dateKey] == nil {
+		e.cache.AccountDays[dateKey] = make(map[string]map[string]map[string]TokenStats)
+	}
+	if e.cache.AccountDays[dateKey][agent] == nil {
+		e.cache.AccountDays[dateKey][agent] = make(map[string]map[string]TokenStats)
+	}
+	if e.cache.AccountDays[dateKey][agent][account] == nil {
+		e.cache.AccountDays[dateKey][agent][account] = make(map[string]TokenStats)
+	}
+	existing := e.cache.AccountDays[dateKey][agent][account][model]
+	existing.Add(delta)
+	e.cache.AccountDays[dateKey][agent][account][model] = existing
+
+	if e.cache.AccountLastActive == nil {
+		e.cache.AccountLastActive = make(map[string]map[string]int64)
+	}
+	if e.cache.AccountLastActive[agent] == nil {
+		e.cache.AccountLastActive[agent] = make(map[string]int64)
+	}
+	if tsMs > e.cache.AccountLastActive[agent][account] {
+		e.cache.AccountLastActive[agent][account] = tsMs
+	}
+
+	if time.Since(t) <= 8*24*time.Hour {
+		slotStart := (tsMs / 300_000) * 300_000
+		if e.cache.AccountRecent5m == nil {
+			e.cache.AccountRecent5m = make(map[string]map[string]map[string]*bucket5m)
+		}
+		if e.cache.AccountRecent5m[agent] == nil {
+			e.cache.AccountRecent5m[agent] = make(map[string]map[string]*bucket5m)
+		}
+		if e.cache.AccountRecent5m[agent][account] == nil {
+			e.cache.AccountRecent5m[agent][account] = make(map[string]*bucket5m)
+		}
+		bKey := itoa64(slotStart) + "|" + model
+		b := e.cache.AccountRecent5m[agent][account][bKey]
+		if b == nil {
+			b = &bucket5m{
+				SlotStartMs: slotStart,
+				EarliestMs:  tsMs,
+				Model:       model,
+			}
+			e.cache.AccountRecent5m[agent][account][bKey] = b
+		}
+		if tsMs < b.EarliestMs {
+			b.EarliestMs = tsMs
+		}
+		b.Stats.Add(delta)
+	}
 }
 
 func (e *Engine) recordEventLocked(agent, model string, tsMs int64, delta TokenStats) {
@@ -1020,6 +1367,16 @@ func (e *Engine) pruneRecentLocked(now time.Time) {
 			if b.SlotStartMs < cutoffMs {
 				delete(buckets, k)
 				e.dirty = true
+			}
+		}
+	}
+	for _, byAcct := range e.cache.AccountRecent5m {
+		for _, buckets := range byAcct {
+			for k, b := range buckets {
+				if b.SlotStartMs < cutoffMs {
+					delete(buckets, k)
+					e.dirty = true
+				}
 			}
 		}
 	}
@@ -1200,8 +1557,8 @@ func (e *Engine) buildSummaryLocked(now time.Time, sc scanCounters, scanMs int64
 		}
 		au.Models = models
 
-		// Populate 5h & Weekly quota windows.
-		e.populateQuotaWindowsLocked(au, now, rolling7d[def.id])
+		// Populate 5h & Weekly quota windows (and per-account breakdowns for multi-account agents).
+		e.populateQuotaWindowsLocked(au, now, rolling7d[def.id], sc, todayKey, weekStartKey, monthPrefix, fiveHourCutoff, sevenDayCutoff)
 
 		grand.Today.Add(au.Today)
 		grand.FiveHour.Add(au.FiveHour)
@@ -1232,7 +1589,14 @@ func (e *Engine) buildSummaryLocked(now time.Time, sc scanCounters, scanMs int64
 	return grand
 }
 
-func (e *Engine) populateQuotaWindowsLocked(au *AgentUsage, now time.Time, rolling7d TokenStats) {
+func (e *Engine) populateQuotaWindowsLocked(
+	au *AgentUsage,
+	now time.Time,
+	rolling7d TokenStats,
+	sc scanCounters,
+	todayKey, weekStartKey, monthPrefix string,
+	fiveHourCutoff, sevenDayCutoff int64,
+) {
 	nowMs := now.UnixMilli()
 
 	// Default local fallback windows: intentionally leave ResetsAt = 0 instead of
@@ -1345,69 +1709,355 @@ func (e *Engine) populateQuotaWindowsLocked(au *AgentUsage, now time.Time, rolli
 		}
 
 	case "agy":
-		if snap := e.cache.AgyQuota; snap != nil {
-			if snap.PlanType != "" {
-				au.PlanType = snap.PlanType
+		e.populateAgyAccountsLocked(au, nowMs, rolling7d, sc, todayKey, weekStartKey, monthPrefix, fiveHourCutoff, sevenDayCutoff)
+	}
+}
+
+func buildAgyQuotaWindows(snap *officialQuotaSnapshot, nowMs int64, fiveHourTok, weeklyTok, rolling7d TokenStats, accountTag string) (QuotaWindow, QuotaWindow) {
+	w5h := QuotaWindow{
+		Source:        "local",
+		ResetsAt:      0,
+		WindowMinutes: 300,
+		Tokens:        fiveHourTok,
+	}
+	wWeekly := QuotaWindow{
+		Source:        "local",
+		ResetsAt:      0,
+		WindowMinutes: 10080,
+		Tokens:        weeklyTok,
+	}
+	if snap == nil {
+		if fiveHourTok.TotalTokens > 0 {
+			w5h.Note = "近 5 小时本地消耗统计（打开 agy 对话后自动通过官方 statusLine 同步配额与重置时间）"
+		} else {
+			w5h.Note = "近 5 小时无活跃对话（打开 agy 对话后自动通过官方 statusLine 同步配额）"
+		}
+		wWeekly.Note = "本周本地消耗统计（打开 agy 对话后自动同步官方 7 天滚动配额与重置时间）"
+		return w5h, wWeekly
+	}
+
+	tagSuffix := ""
+	if accountTag != "" {
+		tagSuffix = " · " + accountTag
+	}
+
+	if snap.Primary != nil {
+		pct := snap.Primary.UsedPercent
+		expired := snap.Primary.ResetsAt > 0 && nowMs > snap.Primary.ResetsAt
+		if expired {
+			pct = 0
+		}
+		note := snap.SourceNote
+		if tagSuffix != "" && strings.HasSuffix(note, "）") {
+			note = strings.TrimSuffix(note, "）") + tagSuffix + "）"
+		}
+		if expired {
+			note = "上次 5h 窗口已重置（待 agy 新操作刷新）"
+		}
+		w5h = QuotaWindow{
+			Source:        "official",
+			UsedPercent:   &pct,
+			ResetsAt:      snap.Primary.ResetsAt,
+			WindowMinutes: snap.Primary.WindowMinutes,
+			Tokens:        fiveHourTok,
+			Expired:       expired,
+			ObservedAt:    snap.ObservedAt,
+			Note:          note,
+		}
+	} else if fiveHourTok.TotalTokens > 0 {
+		w5h.Note = "近 5 小时本地消耗统计（当前 statusLine 未返回 5h 配额桶）"
+	} else {
+		w5h.Note = "近 5 小时无活跃对话"
+	}
+
+	if snap.Secondary != nil {
+		pct := snap.Secondary.UsedPercent
+		expired := snap.Secondary.ResetsAt > 0 && nowMs > snap.Secondary.ResetsAt
+		if expired {
+			pct = 0
+		}
+		note := snap.SourceNote
+		if tagSuffix != "" && strings.HasSuffix(note, "）") {
+			note = strings.TrimSuffix(note, "）") + tagSuffix + "）"
+		}
+		if expired {
+			note = "上周窗口已重置（待 agy 新操作刷新）"
+		}
+		wWeekly = QuotaWindow{
+			Source:        "official",
+			UsedPercent:   &pct,
+			ResetsAt:      snap.Secondary.ResetsAt,
+			WindowMinutes: snap.Secondary.WindowMinutes,
+			Tokens:        rolling7d,
+			Expired:       expired,
+			ObservedAt:    snap.ObservedAt,
+			Note:          note,
+		}
+	} else {
+		wWeekly.Note = "本周本地消耗统计（当前 statusLine 未返回周配额桶）"
+	}
+
+	return w5h, wWeekly
+}
+
+func (e *Engine) populateAgyAccountsLocked(
+	au *AgentUsage,
+	nowMs int64,
+	rolling7d TokenStats,
+	sc scanCounters,
+	todayKey, weekStartKey, monthPrefix string,
+	fiveHourCutoff, sevenDayCutoff int64,
+) {
+	acctSet := make(map[string]struct{})
+	for k := range e.cache.AgyAccounts {
+		if k != "" {
+			acctSet[k] = struct{}{}
+		}
+	}
+	for _, byAgent := range e.cache.AccountDays {
+		for k := range byAgent["agy"] {
+			if k != "" {
+				acctSet[k] = struct{}{}
 			}
-			if e.cache.AgyQuotaExtra != "" {
-				au.HistoryNote = e.cache.AgyQuotaExtra
+		}
+	}
+	for k := range e.cache.AccountRecent5m["agy"] {
+		if k != "" {
+			acctSet[k] = struct{}{}
+		}
+	}
+
+	hasReal := false
+	for k := range acctSet {
+		if k != agyDefaultAccountKey {
+			hasReal = true
+			break
+		}
+	}
+	if hasReal {
+		delete(acctSet, agyDefaultAccountKey)
+	}
+
+	if len(acctSet) == 0 {
+		// Fallback to legacy single-account snapshot if present, otherwise local-only hints.
+		au.Window5h, au.WindowWeekly = buildAgyQuotaWindows(e.cache.AgyQuota, nowMs, au.FiveHour, au.Week, rolling7d, "")
+		if e.cache.AgyQuota != nil && e.cache.AgyQuota.PlanType != "" {
+			au.PlanType = e.cache.AgyQuota.PlanType
+		}
+		if e.cache.AgyQuotaExtra != "" {
+			au.HistoryNote = e.cache.AgyQuotaExtra
+		}
+		return
+	}
+
+	acctKeys := make([]string, 0, len(acctSet))
+	for k := range acctSet {
+		acctKeys = append(acctKeys, k)
+	}
+	sort.Strings(acctKeys)
+
+	// Pre-aggregate per-account daily/model totals and 5h/7d rolling stats.
+	type acctAgg struct {
+		today     TokenStats
+		fiveHour  TokenStats
+		week      TokenStats
+		rolling7d TokenStats
+		month     TokenStats
+		total     TokenStats
+		models    map[string]*ModelUsage
+	}
+	aggs := make(map[string]*acctAgg, len(acctKeys))
+	for _, k := range acctKeys {
+		aggs[k] = &acctAgg{models: make(map[string]*ModelUsage)}
+	}
+
+	for dateKey, byAgent := range e.cache.AccountDays {
+		byAcct := byAgent["agy"]
+		if len(byAcct) == 0 {
+			continue
+		}
+		isToday := dateKey == todayKey
+		isThisWeek := dateKey >= weekStartKey && dateKey <= todayKey
+		isThisMonth := strings.HasPrefix(dateKey, monthPrefix)
+		for acctKey, byModel := range byAcct {
+			ag := aggs[acctKey]
+			if ag == nil {
+				continue
 			}
-			if snap.Primary != nil {
-				pct := snap.Primary.UsedPercent
-				expired := snap.Primary.ResetsAt > 0 && nowMs > snap.Primary.ResetsAt
-				if expired {
-					pct = 0
+			for modelName, st := range byModel {
+				ag.total.Add(st)
+				if isThisMonth {
+					ag.month.Add(st)
 				}
-				note := snap.SourceNote
-				if expired {
-					note = "上次 5h 窗口已重置（待 agy 新操作刷新）"
+				if isThisWeek {
+					ag.week.Add(st)
 				}
-				au.Window5h = QuotaWindow{
-					Source:        "official",
-					UsedPercent:   &pct,
-					ResetsAt:      snap.Primary.ResetsAt,
-					WindowMinutes: snap.Primary.WindowMinutes,
-					Tokens:        au.FiveHour,
-					Expired:       expired,
-					ObservedAt:    snap.ObservedAt,
-					Note:          note,
+				if isToday {
+					ag.today.Add(st)
 				}
-			} else if au.FiveHour.TotalTokens > 0 {
-				au.Window5h.Note = "近 5 小时本地消耗统计（当前 statusLine 未返回 5h 配额桶）"
-			} else {
-				au.Window5h.Note = "近 5 小时无活跃对话"
+				mu := ag.models[modelName]
+				if mu == nil {
+					mu = &ModelUsage{Model: modelName}
+					ag.models[modelName] = mu
+				}
+				mu.Total.Add(st)
+				if isThisMonth {
+					mu.Month.Add(st)
+				}
+				if isThisWeek {
+					mu.Week.Add(st)
+				}
+				if isToday {
+					mu.Today.Add(st)
+				}
 			}
-			if snap.Secondary != nil {
-				pct := snap.Secondary.UsedPercent
-				expired := snap.Secondary.ResetsAt > 0 && nowMs > snap.Secondary.ResetsAt
-				if expired {
-					pct = 0
-				}
-				note := snap.SourceNote
-				if expired {
-					note = "上周窗口已重置（待 agy 新操作刷新）"
-				}
-				au.WindowWeekly = QuotaWindow{
-					Source:        "official",
-					UsedPercent:   &pct,
-					ResetsAt:      snap.Secondary.ResetsAt,
-					WindowMinutes: snap.Secondary.WindowMinutes,
-					Tokens:        rolling7d,
-					Expired:       expired,
-					ObservedAt:    snap.ObservedAt,
-					Note:          note,
-				}
-			} else {
-				au.WindowWeekly.Note = "本周本地消耗统计（当前 statusLine 未返回周配额桶）"
+		}
+	}
+
+	for acctKey, buckets := range e.cache.AccountRecent5m["agy"] {
+		ag := aggs[acctKey]
+		if ag == nil {
+			continue
+		}
+		for _, b := range buckets {
+			if b.SlotStartMs+300_000 >= fiveHourCutoff {
+				ag.fiveHour.Add(b.Stats)
+			}
+			if b.SlotStartMs+300_000 >= sevenDayCutoff {
+				ag.rolling7d.Add(b.Stats)
+			}
+		}
+	}
+
+	accounts := make([]AccountUsage, 0, len(acctKeys))
+	savedProfiles := loadAgyProfilesMeta(e.opts.AgyProfilesPath)
+	var attributedTotal int64
+	var primaryIdx = -1
+	var newestObserved int64 = -1
+
+	for _, acctKey := range acctKeys {
+		ag := aggs[acctKey]
+		cached := e.cache.AgyAccounts[acctKey]
+
+		label := agyAccountDisplayLabel(acctKey, "")
+		planType := ""
+		modelName := ""
+		extraNote := ""
+		var snap *officialQuotaSnapshot
+		var observedAt int64
+		if cached != nil {
+			if cached.Label != "" {
+				label = cached.Label
+			}
+			modelName = cached.ModelName
+			extraNote = cached.ExtraNote
+			snap = cached.Quota
+			if snap != nil {
+				planType = snap.PlanType
+				observedAt = snap.ObservedAt
+			}
+		}
+
+		lastAct := e.cache.AccountLastActive["agy"][acctKey]
+		if observedAt > lastAct {
+			lastAct = observedAt
+		}
+
+		models := make([]ModelUsage, 0, len(ag.models))
+		for _, m := range ag.models {
+			models = append(models, *m)
+		}
+		sort.Slice(models, func(i, j int) bool {
+			return models[i].Total.TotalTokens > models[j].Total.TotalTokens
+		})
+		if len(models) > 10 {
+			models = models[:10]
+		}
+
+		w5h, wWeekly := buildAgyQuotaWindows(snap, nowMs, ag.fiveHour, ag.week, ag.rolling7d, "")
+		attributedTotal += ag.total.TotalTokens
+
+		accItem := AccountUsage{
+			Account:      acctKey,
+			Label:        label,
+			PlanType:     planType,
+			ModelName:    modelName,
+			LastActiveAt: lastAct,
+			ObservedAt:   observedAt,
+			LogFiles:     sc.agyAccountFiles[acctKey],
+			Window5h:     w5h,
+			WindowWeekly: wWeekly,
+			ExtraNote:    extraNote,
+			Today:        ag.today,
+			FiveHour:     ag.fiveHour,
+			Week:         ag.week,
+			Month:        ag.month,
+			Total:        ag.total,
+			Models:       models,
+		}
+		applyAgyProfileAuthStatus(&accItem, savedProfiles, nowMs)
+		accounts = append(accounts, accItem)
+		if snap != nil && observedAt > newestObserved {
+			newestObserved = observedAt
+			primaryIdx = len(accounts) - 1
+		}
+	}
+
+	au.Accounts = accounts
+
+	// Populate top-level AgentUsage fields cleanly for single-account display & backward compatibility.
+	if primaryIdx < 0 && len(accounts) > 0 {
+		primaryIdx = 0
+	}
+	if primaryIdx >= 0 {
+		prim := accounts[primaryIdx]
+		primCached := e.cache.AgyAccounts[prim.Account]
+		var primSnap *officialQuotaSnapshot
+		if primCached != nil {
+			primSnap = primCached.Quota
+		}
+		if len(accounts) == 1 {
+			au.PlanType = prim.PlanType
+			au.Window5h, au.WindowWeekly = buildAgyQuotaWindows(primSnap, nowMs, au.FiveHour, au.Week, rolling7d, "")
+			if prim.ExtraNote != "" {
+				au.HistoryNote = prim.ExtraNote
 			}
 		} else {
-			if au.FiveHour.TotalTokens > 0 {
-				au.Window5h.Note = "近 5 小时本地消耗统计（打开 agy 对话后自动通过官方 statusLine 同步配额与重置时间）"
-			} else {
-				au.Window5h.Note = "近 5 小时无活跃对话（打开 agy 对话后自动通过官方 statusLine 同步配额）"
+			au.PlanType = fmt.Sprintf("%d 个账号", len(accounts))
+			tag := prim.Label
+			if prim.Account == agyDefaultAccountKey {
+				tag = ""
 			}
-			au.WindowWeekly.Note = "本周本地消耗统计（打开 agy 对话后自动同步官方 7 天滚动配额与重置时间）"
+			primRolling7d := aggs[prim.Account].rolling7d
+			au.Window5h, au.WindowWeekly = buildAgyQuotaWindows(primSnap, nowMs, prim.FiveHour, prim.Week, primRolling7d, tag)
 		}
+		if prim.LastActiveAt > au.LastActiveAt {
+			au.LastActiveAt = prim.LastActiveAt
+		}
+	}
+
+	unattributedTok := au.Total.TotalTokens - attributedTotal
+	if hasReal && unattributedTok > 0 && sc.agyUnattributedFiles > 0 {
+		unattrNote := fmt.Sprintf("另有 %d 个历史会话（共 %s tokens）尚未关联账号，重新打开对应会话后将自动归属",
+			sc.agyUnattributedFiles, formatBriefTokenCount(unattributedTok))
+		if au.HistoryNote != "" {
+			au.HistoryNote += "；" + unattrNote
+		} else {
+			au.HistoryNote = unattrNote
+		}
+	}
+}
+
+func formatBriefTokenCount(n int64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", float64(n)/1e9)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.2fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
 	}
 }
 

@@ -152,6 +152,11 @@ func CurrentTmuxSession() string {
 	return strings.TrimSpace(string(out))
 }
 
+// FindTmuxSocket locates the active tmux server socket for the current user, if any.
+func FindTmuxSocket() string {
+	return findTmuxSocket()
+}
+
 func findTmuxSocket() string {
 	uid := os.Getuid()
 	candidates := []string{
@@ -772,12 +777,10 @@ func notifyMacTerminalAttached(label string) {
 	_ = exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script).Run()
 }
 
-// openMacTerminalWindow opens a real graphical Terminal.app window attached to the newly created tmux session.
+// OpenMacTerminalWindow opens a real graphical Terminal.app window attached to the given tmux session.
 // Uses LaunchServices `open -a Terminal <.command>` to avoid macOS AppleScript Automation permission prompts,
-// and self-closes its Terminal.app window cleanly once the tmux session exits or is killed from phone.
-func openMacTerminalWindow(tmuxBin, sessName string) {
-	time.Sleep(300 * time.Millisecond)
-
+// and self-closes its Terminal.app window cleanly once the tmux session exits.
+func OpenMacTerminalWindow(tmuxBin, sessName string) error {
 	sock := findTmuxSocket()
 	attachCmd := fmt.Sprintf("%q attach-session -t %q", tmuxBin, sessName)
 	if sock != "" {
@@ -796,14 +799,20 @@ fi
 exit 0
 `, scriptPath, attachCmd)
 	if err := os.WriteFile(scriptPath, []byte(content), 0o700); err != nil {
-		log.Printf("write open command script failed: %v", err)
-		return
+		return fmt.Errorf("write open command script: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "/usr/bin/open", "-a", "Terminal", scriptPath).Run(); err != nil {
-		log.Printf("open Terminal.app failed: %v", err)
-		return
+		return fmt.Errorf("open Terminal.app: %w", err)
+	}
+	return nil
+}
+
+func openMacTerminalWindow(tmuxBin, sessName string) {
+	time.Sleep(300 * time.Millisecond)
+	if err := OpenMacTerminalWindow(tmuxBin, sessName); err != nil {
+		log.Printf("openMacTerminalWindow(%s) failed: %v", sessName, err)
 	}
 }

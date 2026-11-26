@@ -432,6 +432,121 @@
       font-weight: 500;
       color: var(--label-2);
     }
+    .account-email-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: var(--fill);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--label-2);
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Multi-Account Sub-Cards inside an Agent Card */
+    .accounts-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .account-panel {
+      border: 0.5px solid var(--sep);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: color-mix(in srgb, var(--fill) 32%, transparent);
+    }
+    .account-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .account-id {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    .account-label {
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--label);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .account-model-chip {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--fill);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--label-2);
+    }
+    .account-extra {
+      font-size: 12px;
+      color: var(--label-2);
+      line-height: 1.45;
+      padding: 0 2px;
+    }
+    .auth-banner {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1.45;
+    }
+    .auth-banner.expired {
+      background: color-mix(in srgb, var(--red) 14%, transparent);
+      color: var(--red);
+    }
+    .auth-banner.soon {
+      background: color-mix(in srgb, var(--orange) 15%, transparent);
+      color: var(--orange);
+    }
+    .auth-banner.ok {
+      background: var(--fill);
+      color: var(--label-2);
+      font-weight: 400;
+    }
+    .accounts-total-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 18px;
+      flex-wrap: wrap;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--fill);
+      font-size: 12.5px;
+      color: var(--label-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .accounts-total-strip strong {
+      color: var(--label);
+      font-weight: 600;
+    }
+    .accounts-total-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+    }
+    .account-filter-seg {
+      max-width: 100%;
+      overflow-x: auto;
+    }
 
     /* Balanced Two-Zone Body inside Each Agent Card */
     .agent-body {
@@ -959,6 +1074,14 @@
     let selectedDay = null;
     let userPickedDay = false;
     const expandedAgents = new Set();
+    const selectedAccountFilter = {};
+
+    function shortAcctLabel(label) {
+      const s = String(label || '');
+      const at = s.indexOf('@');
+      if (at > 0 && s.length > 18) return s.slice(0, at);
+      return s;
+    }
 
     function applyTheme(theme) {
       document.documentElement.setAttribute('data-theme', theme);
@@ -1158,15 +1281,53 @@
         </div>`;
     }
 
+    function renderStatQuad(src, color) {
+      return `
+        <div class="stat-quad">
+          <div class="stat-tile">
+            <span class="k">今日</span>
+            <span class="v" title="${fmtExact(src.today && src.today.total_tokens)}">${fmtNum(src.today && src.today.total_tokens)}</span>
+          </div>
+          <div class="stat-tile">
+            <span class="k">本周</span>
+            <span class="v" title="${fmtExact(src.week && src.week.total_tokens)}">${fmtNum(src.week && src.week.total_tokens)}</span>
+          </div>
+          <div class="stat-tile">
+            <span class="k">本月</span>
+            <span class="v" title="${fmtExact(src.month && src.month.total_tokens)}">${fmtNum(src.month && src.month.total_tokens)}</span>
+          </div>
+          <div class="stat-tile emphasis">
+            <span class="k">总计</span>
+            <span class="v" style="color:${color}" title="${fmtExact(src.total && src.total.total_tokens)}">${fmtNum(src.total && src.total.total_tokens)}</span>
+          </div>
+        </div>`;
+    }
+
     function renderAgents(data) {
       const agents = data.agents || [];
       document.getElementById('agentsStack').innerHTML = agents.map(a => {
         const color = AGENT_COLORS[a.agent] || 'var(--accent)';
+        const accounts = a.accounts || [];
+        const multiAcct = accounts.length >= 2;
+        const singleAcct = accounts.length === 1 ? accounts[0] : null;
+
         const planHtml = a.plan_type
           ? `<span class="plan-pill" style="color:${color};background:color-mix(in srgb, ${color} 14%, transparent)">${esc(a.plan_type.toUpperCase())}</span>`
           : '';
+        const singleAcctChip = singleAcct && singleAcct.account && singleAcct.account !== 'default'
+          ? `<span class="account-email-chip" title="${esc(singleAcct.label || singleAcct.account)}">${esc(singleAcct.label || singleAcct.account)}</span>`
+          : '';
 
-        const allModels = a.models || [];
+        let acctFilter = selectedAccountFilter[a.agent] || 'all';
+        if (multiAcct && acctFilter !== 'all' && !accounts.some(x => x.account === acctFilter)) {
+          acctFilter = 'all';
+          selectedAccountFilter[a.agent] = 'all';
+        }
+        const filteredAcct = multiAcct && acctFilter !== 'all'
+          ? accounts.find(x => x.account === acctFilter)
+          : null;
+
+        const allModels = filteredAcct ? (filteredAcct.models || []) : (a.models || []);
         const isExpanded = expandedAgents.has(a.agent);
         const defaultLimit = 5;
         const visibleModels = isExpanded ? allModels : allModels.slice(0, defaultLimit);
@@ -1176,15 +1337,31 @@
           ? `<button type="button" class="text-link-btn" data-toggle-agent="${esc(a.agent)}">${isExpanded ? '收起' : `展开全部 ${allModels.length} 个`}</button>`
           : '';
 
+        const acctFilterHtml = multiAcct
+          ? `<div class="segmented account-filter-seg" role="group" aria-label="按账号筛选模型明细">
+              <button type="button" data-acct-agent="${esc(a.agent)}" data-acct-key="all" class="${acctFilter === 'all' ? 'active' : ''}">全部账号</button>
+              ${accounts.map(acc => `
+                <button type="button" data-acct-agent="${esc(a.agent)}" data-acct-key="${esc(acc.account)}" title="${esc(acc.label || acc.account)}" class="${acctFilter === acc.account ? 'active' : ''}">${esc(shortAcctLabel(acc.label || acc.account))}</button>
+              `).join('')}
+            </div>`
+          : '';
+
+        const filesMetaText = filteredAcct
+          ? `共 ${allModels.length} 个模型 · 日志 ${fmtExact(filteredAcct.log_files || 0)} 个`
+          : `共 ${allModels.length} 个模型 · 日志 ${fmtExact(a.log_files)} 个 · ${fmtBytes(a.log_bytes)}`;
+
         const modelsHtml = allModels.length
           ? `
             <div class="models-section">
               <div class="models-bar">
                 <div class="models-bar-left">
                   <span class="models-heading">模型用量明细</span>
-                  <span class="models-files">共 ${allModels.length} 个模型 · 日志 ${fmtExact(a.log_files)} 个 · ${fmtBytes(a.log_bytes)}</span>
+                  <span class="models-files">${filesMetaText}</span>
                 </div>
-                ${toggleBtn}
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  ${acctFilterHtml}
+                  ${toggleBtn}
+                </div>
               </div>
               <div class="model-list">
                 <div class="model-row head">
@@ -1217,8 +1394,11 @@
           : `
             <div class="models-section">
               <div class="models-bar">
-                <span class="models-heading">暂无模型用量记录</span>
-                <span class="models-files">${a.installed ? '已检测到本地目录' : '未检测到本地目录'}</span>
+                <div class="models-bar-left">
+                  <span class="models-heading">${filteredAcct ? '该账号暂无已归属模型记录' : '暂无模型用量记录'}</span>
+                  <span class="models-files">${filteredAcct ? '对话产生新消息或重新打开会话后自动归属' : (a.installed ? '已检测到本地目录' : '未检测到本地目录')}</span>
+                </div>
+                ${acctFilterHtml}
               </div>
             </div>`;
 
@@ -1233,6 +1413,68 @@
             </div>`
           : '';
 
+        function renderAuthBanner(acc) {
+          if (!acc || !acc.auth_expire_note) return '';
+          if (acc.auth_expired) {
+            return `<div class="auth-banner expired"><span>✖</span><span>${esc(acc.auth_expire_note)}</span></div>`;
+          }
+          if (acc.auth_expiring_soon) {
+            return `<div class="auth-banner soon"><span>⚠</span><span>${esc(acc.auth_expire_note)}</span></div>`;
+          }
+          return `<div class="auth-banner ok"><span>🔑</span><span>${esc(acc.auth_expire_note)}</span></div>`;
+        }
+
+        const bodyHtml = multiAcct
+          ? `
+            <div class="accounts-stack">
+              ${accounts.map(acc => {
+                const accPlanHtml = acc.plan_type
+                  ? `<span class="plan-pill" style="color:${color};background:color-mix(in srgb, ${color} 14%, transparent)">${esc(acc.plan_type.toUpperCase())}</span>`
+                  : '';
+                const accModelHtml = acc.model_name
+                  ? `<span class="account-model-chip">${esc(acc.model_name)}</span>`
+                  : '';
+                return `
+                  <div class="account-panel">
+                    <div class="account-head">
+                      <div class="account-id">
+                        <span class="account-label" title="${esc(acc.label || acc.account)}">${esc(acc.label || acc.account)}</span>
+                        ${accPlanHtml}
+                        ${accModelHtml}
+                      </div>
+                      <span class="status-chip">${fmtRelative(acc.last_active_at || acc.observed_at)}</span>
+                    </div>
+                    ${renderAuthBanner(acc)}
+                    <div class="agent-body">
+                      <div class="quota-group">
+                        ${renderQuotaRow('5 小时滚动窗口', acc.window_5h || {}, color)}
+                        ${renderQuotaRow('周配额窗口', acc.window_weekly || {}, color)}
+                      </div>
+                      ${renderStatQuad(acc, color)}
+                    </div>
+                    ${acc.extra_note ? `<div class="account-extra">${esc(acc.extra_note)}</div>` : ''}
+                  </div>`;
+              }).join('')}
+            </div>
+            <div class="accounts-total-strip">
+              <span>全部账号汇总</span>
+              <div class="accounts-total-metrics">
+                <span>今日 <strong>${fmtNum(a.today && a.today.total_tokens)}</strong></span>
+                <span>本周 <strong>${fmtNum(a.week && a.week.total_tokens)}</strong></span>
+                <span>本月 <strong>${fmtNum(a.month && a.month.total_tokens)}</strong></span>
+                <span>总计 <strong style="color:${color}">${fmtNum(a.total && a.total.total_tokens)}</strong></span>
+              </div>
+            </div>`
+          : `
+            ${renderAuthBanner(singleAcct)}
+            <div class="agent-body">
+              <div class="quota-group">
+                ${renderQuotaRow('5 小时滚动窗口', a.window_5h || {}, color)}
+                ${renderQuotaRow('周配额窗口', a.window_weekly || {}, color)}
+              </div>
+              ${renderStatQuad(a, color)}
+            </div>`;
+
         return `
           <article class="ios-card agent-card">
             <div class="agent-header">
@@ -1240,37 +1482,14 @@
                 <span class="agent-badge-dot" style="background:${color}"></span>
                 <span class="agent-name">${esc(a.display_name)}</span>
                 ${planHtml}
+                ${singleAcctChip}
               </div>
               <div class="agent-right-meta">
                 <span class="status-chip">${fmtRelative(a.last_active_at)}</span>
               </div>
             </div>
 
-            <div class="agent-body">
-              <div class="quota-group">
-                ${renderQuotaRow('5 小时滚动窗口', a.window_5h || {}, color)}
-                ${renderQuotaRow('周配额窗口', a.window_weekly || {}, color)}
-              </div>
-              <div class="stat-quad">
-                <div class="stat-tile">
-                  <span class="k">今日</span>
-                  <span class="v" title="${fmtExact(a.today && a.today.total_tokens)}">${fmtNum(a.today && a.today.total_tokens)}</span>
-                </div>
-                <div class="stat-tile">
-                  <span class="k">本周</span>
-                  <span class="v" title="${fmtExact(a.week && a.week.total_tokens)}">${fmtNum(a.week && a.week.total_tokens)}</span>
-                </div>
-                <div class="stat-tile">
-                  <span class="k">本月</span>
-                  <span class="v" title="${fmtExact(a.month && a.month.total_tokens)}">${fmtNum(a.month && a.month.total_tokens)}</span>
-                </div>
-                <div class="stat-tile emphasis">
-                  <span class="k">总计</span>
-                  <span class="v" style="color:${color}" title="${fmtExact(a.total && a.total.total_tokens)}">${fmtNum(a.total && a.total.total_tokens)}</span>
-                </div>
-              </div>
-            </div>
-
+            ${bodyHtml}
             ${modelsHtml}
             ${noteHtml}
           </article>`;
@@ -1281,6 +1500,15 @@
           const id = btn.getAttribute('data-toggle-agent');
           if (expandedAgents.has(id)) expandedAgents.delete(id);
           else expandedAgents.add(id);
+          if (latestData) renderAgents(latestData);
+        };
+      });
+
+      document.querySelectorAll('[data-acct-agent]').forEach(btn => {
+        btn.onclick = () => {
+          const agentId = btn.getAttribute('data-acct-agent');
+          const key = btn.getAttribute('data-acct-key');
+          selectedAccountFilter[agentId] = key;
           if (latestData) renderAgents(latestData);
         };
       });

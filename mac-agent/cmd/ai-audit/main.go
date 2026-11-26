@@ -29,6 +29,10 @@ func main() {
 		printHelp()
 		return
 	}
+	if os.Args[1] == "agy" {
+		cmdAgy(os.Args[2:])
+		return
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "无法读取配置 (%s): %v\n", config.DefaultPath(), err)
@@ -103,6 +107,7 @@ func printHelp() {
   ai-audit status                         查看中转状态、手机在线数、当前模式、tmux 会话
   ai-audit usage                          查看 Claude / Codex / Antigravity 用量与配额重置时间
   ai-audit web                            在浏览器打开本机 Agent 用量看板网页
+  ai-audit agy [ls|save|login|switch|open|rm]  管理多 Antigravity 账号并一键切换/新开终端
   ai-audit mode auto|both|phone|notify    切换审批模式 (智能离座 / 双端同步 / 始终手机 / 仅通知)
   ai-audit timeout <秒>                   设置审批弹窗超时时长 (5-600秒，默认 30 秒，Mac/手机同步生效)
   ai-audit auto-approve on|off            开启/关闭超时自动确认授权 (默认开启)
@@ -240,12 +245,46 @@ func cmdUsage(cfg config.Config) {
 		if a.PlanType != "" {
 			plan = " [" + strings.ToUpper(a.PlanType) + "]"
 		}
-		fmt.Printf("%-14s%s  今日 %-8s  本周 %-8s  本月 %-8s  总计 %-8s\n",
-			a.DisplayName, plan,
+		acctSuffix := ""
+		if len(a.Accounts) == 1 && a.Accounts[0].Account != "" && a.Accounts[0].Account != "default" {
+			acctSuffix = " (" + a.Accounts[0].Label + ")"
+		}
+		fmt.Printf("%-14s%s%s  今日 %-8s  本周 %-8s  本月 %-8s  总计 %-8s\n",
+			a.DisplayName, plan, acctSuffix,
 			fmtTok(a.Today.TotalTokens), fmtTok(a.Week.TotalTokens),
 			fmtTok(a.Month.TotalTokens), fmtTok(a.Total.TotalTokens))
-		fmt.Printf("  5h 窗口: %-18s  周窗口: %s\n",
-			fmtWindowBrief(a.Window5h), fmtWindowBrief(a.WindowWeekly))
+		if len(a.Accounts) >= 2 {
+			for _, acc := range a.Accounts {
+				accPlan := ""
+				if acc.PlanType != "" {
+					accPlan = " [" + strings.ToUpper(acc.PlanType) + "]"
+				}
+				fmt.Printf("  • %s%s  今日 %-8s  本周 %-8s  总计 %-8s\n",
+					acc.Label, accPlan,
+					fmtTok(acc.Today.TotalTokens), fmtTok(acc.Week.TotalTokens), fmtTok(acc.Total.TotalTokens))
+				fmt.Printf("    5h 窗口: %-22s  周窗口: %s\n",
+					fmtWindowBrief(acc.Window5h), fmtWindowBrief(acc.WindowWeekly))
+				if acc.ExtraNote != "" {
+					fmt.Printf("    %s\n", acc.ExtraNote)
+				}
+				if acc.AuthExpired {
+					fmt.Printf("    ✖ %s\n", acc.AuthExpireNote)
+				} else if acc.AuthExpiringSoon {
+					fmt.Printf("    ⚠ %s\n", acc.AuthExpireNote)
+				}
+			}
+		} else {
+			fmt.Printf("  5h 窗口: %-22s  周窗口: %s\n",
+				fmtWindowBrief(a.Window5h), fmtWindowBrief(a.WindowWeekly))
+			if len(a.Accounts) == 1 {
+				acc := a.Accounts[0]
+				if acc.AuthExpired {
+					fmt.Printf("  ✖ %s\n", acc.AuthExpireNote)
+				} else if acc.AuthExpiringSoon {
+					fmt.Printf("  ⚠ %s\n", acc.AuthExpireNote)
+				}
+			}
+		}
 		if a.HistoryNote != "" {
 			fmt.Printf("  说明: %s\n", a.HistoryNote)
 		}
@@ -275,10 +314,13 @@ func fmtWindowBrief(w usage.QuotaWindow) string {
 			if left < 0 {
 				left = 0
 			}
-			val = fmt.Sprintf("已用 %.0f%%/剩 %.0f%%", *w.UsedPercent, left)
+			val = fmt.Sprintf("已用 %.1f%%/剩 %.1f%%", *w.UsedPercent, left)
 		}
 	}
 	if w.ResetsAt <= 0 {
+		if w.Source == "official" {
+			return val + " (满额可用)"
+		}
 		if w.Source == "local" && w.Tokens.TotalTokens > 0 {
 			return val + " (本地统计)"
 		}

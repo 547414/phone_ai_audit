@@ -44,23 +44,49 @@ type ModelUsage struct {
 	Total TokenStats `json:"total"`
 }
 
+// AccountUsage represents per-account quota windows and token breakdown for a multi-account agent (e.g. Antigravity).
+type AccountUsage struct {
+	Account          string       `json:"account"`
+	Label            string       `json:"label"`
+	PlanType         string       `json:"plan_type,omitempty"`
+	ModelName        string       `json:"model_name,omitempty"`
+	LastActiveAt     int64        `json:"last_active_at"`
+	ObservedAt       int64        `json:"observed_at,omitempty"`
+	LogFiles         int          `json:"log_files,omitempty"`
+	AuthProfile      string       `json:"auth_profile,omitempty"`
+	AuthExpiresAt    int64        `json:"auth_expires_at,omitempty"`
+	AuthExpiringSoon bool         `json:"auth_expiring_soon,omitempty"`
+	AuthExpired      bool         `json:"auth_expired,omitempty"`
+	AuthExpireNote   string       `json:"auth_expire_note,omitempty"`
+	Window5h         QuotaWindow  `json:"window_5h"`
+	WindowWeekly     QuotaWindow  `json:"window_weekly"`
+	ExtraNote        string       `json:"extra_note,omitempty"`
+	Today            TokenStats   `json:"today"`
+	FiveHour         TokenStats   `json:"five_hour"`
+	Week             TokenStats   `json:"week"`
+	Month            TokenStats   `json:"month"`
+	Total            TokenStats   `json:"total"`
+	Models           []ModelUsage `json:"models,omitempty"`
+}
+
 type AgentUsage struct {
-	Agent        string       `json:"agent"`
-	DisplayName  string       `json:"display_name"`
-	PlanType     string       `json:"plan_type,omitempty"`
-	Installed    bool         `json:"installed"`
-	LogFiles     int          `json:"log_files"`
-	LogBytes     int64        `json:"log_bytes"`
-	LastActiveAt int64        `json:"last_active_at"`
-	HistoryNote  string       `json:"history_note,omitempty"`
-	Today        TokenStats   `json:"today"`
-	FiveHour     TokenStats   `json:"five_hour"`
-	Week         TokenStats   `json:"week"`
-	Month        TokenStats   `json:"month"`
-	Total        TokenStats   `json:"total"`
-	Window5h     QuotaWindow  `json:"window_5h"`
-	WindowWeekly QuotaWindow  `json:"window_weekly"`
-	Models       []ModelUsage `json:"models"`
+	Agent        string         `json:"agent"`
+	DisplayName  string         `json:"display_name"`
+	PlanType     string         `json:"plan_type,omitempty"`
+	Installed    bool           `json:"installed"`
+	LogFiles     int            `json:"log_files"`
+	LogBytes     int64          `json:"log_bytes"`
+	LastActiveAt int64          `json:"last_active_at"`
+	HistoryNote  string         `json:"history_note,omitempty"`
+	Today        TokenStats     `json:"today"`
+	FiveHour     TokenStats     `json:"five_hour"`
+	Week         TokenStats     `json:"week"`
+	Month        TokenStats     `json:"month"`
+	Total        TokenStats     `json:"total"`
+	Window5h     QuotaWindow    `json:"window_5h"`
+	WindowWeekly QuotaWindow    `json:"window_weekly"`
+	Models       []ModelUsage   `json:"models"`
+	Accounts     []AccountUsage `json:"accounts,omitempty"`
 }
 
 type DailyPoint struct {
@@ -102,6 +128,7 @@ type Options struct {
 	CodexDir        string
 	AgyDir          string
 	AgyQuotaPath    string
+	AgyProfilesPath string
 	CachePath       string
 	Hostname        string
 	WebURL          string

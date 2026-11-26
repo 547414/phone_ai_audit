@@ -725,6 +725,66 @@ data class UsageModelItem(
     }
 }
 
+data class UsageAccountItem(
+    val account: String,
+    val label: String,
+    val planType: String = "",
+    val modelName: String = "",
+    val lastActiveAt: Long = 0L,
+    val observedAt: Long = 0L,
+    val logFiles: Int = 0,
+    val authProfile: String = "",
+    val authExpiresAt: Long = 0L,
+    val authExpiringSoon: Boolean = false,
+    val authExpired: Boolean = false,
+    val authExpireNote: String = "",
+    val window5h: UsageQuotaWindow = UsageQuotaWindow(),
+    val windowWeekly: UsageQuotaWindow = UsageQuotaWindow(),
+    val extraNote: String = "",
+    val today: UsageTokenStats = UsageTokenStats(),
+    val fiveHour: UsageTokenStats = UsageTokenStats(),
+    val week: UsageTokenStats = UsageTokenStats(),
+    val month: UsageTokenStats = UsageTokenStats(),
+    val total: UsageTokenStats = UsageTokenStats(),
+    val models: List<UsageModelItem> = emptyList()
+) {
+    companion object {
+        fun fromJson(o: JSONObject): UsageAccountItem {
+            val models = mutableListOf<UsageModelItem>()
+            val arr = o.optJSONArray("models")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.let { models.add(UsageModelItem.fromJson(it)) }
+                }
+            }
+            val acct = o.optString("account")
+            return UsageAccountItem(
+                account = acct,
+                label = o.optString("label", acct).ifBlank { acct },
+                planType = o.optString("plan_type"),
+                modelName = o.optString("model_name"),
+                lastActiveAt = o.optLong("last_active_at", 0L),
+                observedAt = o.optLong("observed_at", 0L),
+                logFiles = o.optInt("log_files", 0),
+                authProfile = o.optString("auth_profile"),
+                authExpiresAt = o.optLong("auth_expires_at", 0L),
+                authExpiringSoon = o.optBoolean("auth_expiring_soon", false),
+                authExpired = o.optBoolean("auth_expired", false),
+                authExpireNote = o.optString("auth_expire_note"),
+                window5h = UsageQuotaWindow.fromJson(o.optJSONObject("window_5h")),
+                windowWeekly = UsageQuotaWindow.fromJson(o.optJSONObject("window_weekly")),
+                extraNote = o.optString("extra_note"),
+                today = UsageTokenStats.fromJson(o.optJSONObject("today")),
+                fiveHour = UsageTokenStats.fromJson(o.optJSONObject("five_hour")),
+                week = UsageTokenStats.fromJson(o.optJSONObject("week")),
+                month = UsageTokenStats.fromJson(o.optJSONObject("month")),
+                total = UsageTokenStats.fromJson(o.optJSONObject("total")),
+                models = models
+            )
+        }
+    }
+}
+
 data class UsageAgentItem(
     val agent: String,
     val displayName: String,
@@ -741,7 +801,8 @@ data class UsageAgentItem(
     val total: UsageTokenStats = UsageTokenStats(),
     val window5h: UsageQuotaWindow = UsageQuotaWindow(),
     val windowWeekly: UsageQuotaWindow = UsageQuotaWindow(),
-    val models: List<UsageModelItem> = emptyList()
+    val models: List<UsageModelItem> = emptyList(),
+    val accounts: List<UsageAccountItem> = emptyList()
 ) {
     companion object {
         fun fromJson(o: JSONObject): UsageAgentItem {
@@ -750,6 +811,13 @@ data class UsageAgentItem(
             if (arr != null) {
                 for (i in 0 until arr.length()) {
                     arr.optJSONObject(i)?.let { models.add(UsageModelItem.fromJson(it)) }
+                }
+            }
+            val accounts = mutableListOf<UsageAccountItem>()
+            val accArr = o.optJSONArray("accounts")
+            if (accArr != null) {
+                for (i in 0 until accArr.length()) {
+                    accArr.optJSONObject(i)?.let { accounts.add(UsageAccountItem.fromJson(it)) }
                 }
             }
             return UsageAgentItem(
@@ -768,7 +836,8 @@ data class UsageAgentItem(
                 total = UsageTokenStats.fromJson(o.optJSONObject("total")),
                 window5h = UsageQuotaWindow.fromJson(o.optJSONObject("window_5h")),
                 windowWeekly = UsageQuotaWindow.fromJson(o.optJSONObject("window_weekly")),
-                models = models
+                models = models,
+                accounts = accounts
             )
         }
     }

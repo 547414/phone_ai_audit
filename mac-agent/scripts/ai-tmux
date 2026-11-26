@@ -42,5 +42,13 @@ if "$TMUX_BIN" has-session -t "$sess" 2>/dev/null; then
   exec "$TMUX_BIN" attach-session -t "$sess"
 fi
 
+proxy_exports=""
+for var in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy; do
+  val="${(P)var:-}"
+  if [[ -n "$val" ]]; then
+    proxy_exports="${proxy_exports}export ${var}=$(printf '%q' "$val"); "
+  fi
+done
+
 cmd_str="$(printf '%q ' "$tool" "$@")"
-exec "$TMUX_BIN" new-session -s "$sess" -c "$PWD" -- /bin/zsh -lc "export TERM=xterm-256color; ${cmd_str}; exec /bin/zsh -l"
+exec "$TMUX_BIN" new-session -s "$sess" -c "$PWD" -- /bin/zsh -lc "export TERM=xterm-256color; [[ -f \"\$HOME/.zshrc\" ]] && source \"\$HOME/.zshrc\" >/dev/null 2>&1 || true; ${proxy_exports}${cmd_str}; exec /bin/zsh -l"

@@ -347,7 +347,11 @@ func parseISOToMillis(raw string) int64 {
 	}
 	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
 		if t, err := time.Parse(layout, raw); err == nil {
-			return t.UnixMilli()
+			ms := t.UnixMilli()
+			if ms <= 0 {
+				return 0
+			}
+			return ms
 		}
 	}
 	return 0

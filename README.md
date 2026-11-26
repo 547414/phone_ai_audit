@@ -274,11 +274,18 @@ swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 # 查看中转、手机在线状态、当前审批模式与活跃 tmux 会话
 ai-audit status
 
-# 查看 Claude Code / Codex / Antigravity 用量与 5h / 周重置倒计时
+# 查看 Claude Code / Codex / Antigravity（支持多账号独立配额）用量与 5h / 周重置倒计时
 ai-audit usage
 
 # 在本机浏览器一键打开 Agent 用量网页看板（默认 http://127.0.0.1:9878）
 ai-audit web
+
+# Antigravity (agy) 多账号钥匙串管理、登录到期提醒与一键切换新开终端（零明文 Token 落盘）
+ai-audit agy                        # 查看已保存账号、当前活跃账号(*)、到期状态与实时配额
+ai-audit agy save main              # 将当前已登录账号保存到 macOS Keychain 档案
+ai-audit agy login work             # 清空槽位、弹出新终端登录第二个号并自动保存档案
+ai-audit agy work                   # 一键切换全局账号并弹出新的 tmux 终端运行 agy
+ai-audit agy ttl work 7d            # 自定义登录到期 / 续登提醒周期（支持 7d/14d/30d/auto/off）
 
 # 切换四种审批模式：
 #   auto   = 智能离座（人在电脑前走本地弹窗，离座 60s 或锁屏自动转交手机）
