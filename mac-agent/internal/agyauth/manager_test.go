@@ -391,3 +391,121 @@ func TestProxyPropagationAndScutilParsing(t *testing.T) {
 		t.Fatalf("unexpected fallback proxy exports: %s", s2)
 	}
 }
+
+func TestRemoteSnapshotAndPrepareLaunch(t *testing.T) {
+	tmp := t.TempDir()
+	profilesPath := filepath.Join(tmp, "agy-profiles.json")
+	quotaPath := filepath.Join(tmp, "agy-quota.json")
+	projectDir := filepath.Join(tmp, "demo_proj")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a fake executable `agy` on PATH so FindAgyBinary succeeds even in minimal test environments.
+	fakeBinDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(fakeBinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeAgy := filepath.Join(fakeBinDir, "agy")
+	if err := os.WriteFile(fakeAgy, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
+
+	reset5h := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	quotaJSON := `{
+		"version": 2,
+		"accounts": {
+			"lengxiaoying599@gmail.com": {
+				"email": "lengxiaoying599@gmail.com",
+				"plan_tier": "Google AI Pro",
+				"quota": {
+					"gemini-5h": {"remaining_fraction": 1.0, "reset_time": "` + reset5h + `"}
+				}
+			},
+			"alice@example.com": {
+				"email": "alice@example.com",
+				"plan_tier": "Google AI Ultra",
+				"quota": {
+					"gemini-5h": {"remaining_fraction": 0.75, "reset_time": "` + reset5h + `"}
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(quotaPath, []byte(quotaJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	kc := newMemKeychain()
+	aliceSecret := []byte(`{"access_token":"tok-alice","refresh_token":"ref-alice","email":"alice@example.com"}`)
+	lengSecret := []byte(`{"access_token":"tok-leng","refresh_token":"ref-leng"}`)
+
+	mgr := New(Options{
+		ProfilesPath: profilesPath,
+		AgyQuotaPath: quotaPath,
+		Store:        kc,
+		TrustedApps:  []string{"/usr/bin/security"},
+	})
+
+	_ = kc.Set(DefaultAgyService, DefaultAgyAccount, aliceSecret, nil)
+	if _, err := mgr.SaveCurrent("alice", ""); err != nil {
+		t.Fatalf("save alice: %v", err)
+	}
+	_ = kc.Set(DefaultAgyService, DefaultAgyAccount, lengSecret, nil)
+	if _, err := mgr.SaveCurrent("leng", ""); err != nil {
+		t.Fatalf("save leng: %v", err)
+	}
+
+	// 1. SnapshotForRemote enriches both exact-email and unique-prefix accounts without leaking secrets.
+	snap, err := mgr.SnapshotForRemote(tmp, []string{projectDir, filepath.Join(tmp, "missing")})
+	if err != nil {
+		t.Fatalf("SnapshotForRemote: %v", err)
+	}
+	if !snap.AgyInstalled || !snap.ActivePresent || snap.ActiveProfile != "leng" || snap.ActiveUnsaved {
+		t.Fatalf("unexpected snapshot header: %+v", snap)
+	}
+	if len(snap.SuggestedCwds) != 1 || snap.SuggestedCwds[0] != projectDir {
+		t.Fatalf("unexpected suggested cwds: %+v", snap.SuggestedCwds)
+	}
+	if len(snap.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(snap.Profiles))
+	}
+	// Unique prefix fallback should match "leng" -> "lengxiaoying599@gmail.com".
+	if snap.Profiles[1].Name != "leng" || snap.Profiles[1].Email != "lengxiaoying599@gmail.com" || !strings.Contains(snap.Profiles[1].Quota5h, "100.0%") {
+		t.Fatalf("expected leng matched via unique prefix quota, got %+v", snap.Profiles[1])
+	}
+	rawJSON, _ := json.Marshal(snap)
+	if strings.Contains(string(rawJSON), "tok-alice") || strings.Contains(string(rawJSON), "ref-leng") {
+		t.Fatalf("secret leaked in remote snapshot: %s", string(rawJSON))
+	}
+
+	// 2. PrepareRemoteLaunch switches Keychain to "alice", resolves cwd, and builds agy shell command.
+	plan, unlock, err := mgr.PrepareRemoteLaunch("alice", projectDir, "")
+	if err != nil {
+		t.Fatalf("PrepareRemoteLaunch alice: %v", err)
+	}
+	defer unlock()
+
+	if plan.Profile == nil || plan.Profile.Name != "alice" || plan.AccountLabel != "alice" {
+		t.Fatalf("unexpected plan profile: %+v", plan)
+	}
+	if plan.Cwd != projectDir {
+		t.Fatalf("expected cwd %s, got %s", projectDir, plan.Cwd)
+	}
+	if !strings.Contains(plan.ShellCommand, "agy") {
+		t.Fatalf("expected agy in shell command: %s", plan.ShellCommand)
+	}
+	gotActive, err := kc.Get(DefaultAgyService, DefaultAgyAccount)
+	if err != nil || !bytes.Equal(gotActive, aliceSecret) {
+		t.Fatalf("expected Keychain switched to alice before launch, err=%v got=%s", err, string(gotActive))
+	}
+
+	// 3. Invalid cwd should fail cleanly before switching Keychain.
+	if _, _, err := mgr.PrepareRemoteLaunch("leng", filepath.Join(tmp, "does-not-exist"), ""); err == nil {
+		t.Fatalf("expected error for nonexistent cwd")
+	}
+	gotStillAlice, _ := kc.Get(DefaultAgyService, DefaultAgyAccount)
+	if !bytes.Equal(gotStillAlice, aliceSecret) {
+		t.Fatalf("Keychain should remain untouched on invalid cwd")
+	}
+}

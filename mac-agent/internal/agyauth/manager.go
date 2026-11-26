@@ -180,6 +180,64 @@ type ProfileStatus struct {
 	QuotaWeekly string
 }
 
+// RemoteProfileItem is the zero-secret JSON payload sent to mobile clients for account selection.
+type RemoteProfileItem struct {
+	Name          string `json:"name"`
+	Email         string `json:"email,omitempty"`
+	Active        bool   `json:"active"`
+	PlanTier      string `json:"plan_tier,omitempty"`
+	Quota5h       string `json:"quota_5h,omitempty"`
+	QuotaWeekly   string `json:"quota_weekly,omitempty"`
+	SavedAt       int64  `json:"saved_at,omitempty"`
+	LastUsedAt    int64  `json:"last_used_at,omitempty"`
+	Expired       bool   `json:"expired,omitempty"`
+	ExpiringSoon  bool   `json:"expiring_soon,omitempty"`
+	HardExpiry    bool   `json:"hard_expiry,omitempty"`
+	ExpireSummary string `json:"expire_summary,omitempty"`
+	ExpireWarning string `json:"expire_warning,omitempty"`
+}
+
+// RemoteProfilesSnapshot summarizes available Antigravity accounts for mobile terminal creation.
+type RemoteProfilesSnapshot struct {
+	AgyInstalled  bool                `json:"agy_installed"`
+	ActivePresent bool                `json:"active_present"`
+	ActiveEmail   string              `json:"active_email,omitempty"`
+	ActiveProfile string              `json:"active_profile,omitempty"`
+	ActiveUnsaved bool                `json:"active_unsaved,omitempty"`
+	DefaultCwd    string              `json:"default_cwd,omitempty"`
+	SuggestedCwds []string            `json:"suggested_cwds,omitempty"`
+	Profiles      []RemoteProfileItem `json:"profiles"`
+}
+
+// RemoteLaunchPlan holds the resolved tmux session name, cwd, and shell command for a mobile-triggered agy launch.
+type RemoteLaunchPlan struct {
+	Profile      *Profile
+	AccountLabel string
+	SessionName  string
+	Cwd          string
+	ShellCommand string
+	NotifyLabel  string
+}
+
+// FindAgyBinary locates the Antigravity CLI binary across PATH and common macOS install directories.
+func FindAgyBinary() string {
+	if p, err := exec.LookPath("agy"); err == nil && p != "" {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	for _, cand := range []string{
+		filepath.Join(home, ".local", "bin", "agy"),
+		filepath.Join(home, ".gemini", "antigravity-cli", "bin", "agy"),
+		"/opt/homebrew/bin/agy",
+		"/usr/local/bin/agy",
+	} {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand
+		}
+	}
+	return ""
+}
+
 // SaveOptions configures optional overrides when saving a profile.
 type SaveOptions struct {
 	Email       string
@@ -544,6 +602,164 @@ func (m *Manager) List() ([]ProfileStatus, *ActiveSlotInfo, error) {
 	return out, active, nil
 }
 
+// SnapshotForRemote builds a zero-secret profile summary for the mobile app's new-terminal account picker.
+func (m *Manager) SnapshotForRemote(defaultCwd string, suggestedCwds []string) (*RemoteProfilesSnapshot, error) {
+	list, active, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(defaultCwd) == "" {
+		defaultCwd, _ = os.UserHomeDir()
+	}
+
+	items := make([]RemoteProfileItem, 0, len(list))
+	activeProfile := ""
+	for _, st := range list {
+		if st.Active && activeProfile == "" {
+			activeProfile = st.Name
+		}
+		items = append(items, RemoteProfileItem{
+			Name:          st.Name,
+			Email:         st.Email,
+			Active:        st.Active,
+			PlanTier:      st.PlanTier,
+			Quota5h:       st.Quota5h,
+			QuotaWeekly:   st.QuotaWeekly,
+			SavedAt:       st.SavedAt,
+			LastUsedAt:    st.LastUsedAt,
+			Expired:       st.Expiry.Expired,
+			ExpiringSoon:  st.Expiry.ExpiringSoon,
+			HardExpiry:    st.Expiry.HardExpiry,
+			ExpireSummary: st.Expiry.Summary,
+			ExpireWarning: st.Expiry.Warning,
+		})
+	}
+
+	activePresent := active != nil && active.Present
+	activeEmail := ""
+	if active != nil {
+		activeEmail = active.EmailHint
+	}
+
+	cleanedCwds := make([]string, 0, len(suggestedCwds))
+	seenCwd := make(map[string]bool)
+	for _, c := range suggestedCwds {
+		c = strings.TrimSpace(c)
+		if c == "" || seenCwd[c] {
+			continue
+		}
+		if fi, serr := os.Stat(c); serr == nil && fi.IsDir() {
+			seenCwd[c] = true
+			cleanedCwds = append(cleanedCwds, c)
+		}
+	}
+
+	return &RemoteProfilesSnapshot{
+		AgyInstalled:  FindAgyBinary() != "",
+		ActivePresent: activePresent,
+		ActiveEmail:   activeEmail,
+		ActiveProfile: activeProfile,
+		ActiveUnsaved: activePresent && activeProfile == "",
+		DefaultCwd:    defaultCwd,
+		SuggestedCwds: cleanedCwds,
+		Profiles:      items,
+	}, nil
+}
+
+// PrepareRemoteLaunch switches the global Keychain slot (when accountQuery != "") under the agyauth flock
+// and returns the tmux session name, resolved cwd, shell command, and unlock callback.
+// The caller MUST invoke unlock() (after launching the PTY and waiting briefly for agy to read Keychain).
+func (m *Manager) PrepareRemoteLaunch(accountQuery, cwd, requestedTarget string) (*RemoteLaunchPlan, func(), error) {
+	agyBin := FindAgyBinary()
+	if agyBin == "" {
+		return nil, nil, errors.New("Mac 未找到 agy 命令，请先安装 Antigravity CLI")
+	}
+
+	resolvedCwd, err := resolveLaunchCwd(cwd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	unlock, err := m.acquireLock()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var prof *Profile
+	alias := "default"
+	query := strings.TrimSpace(accountQuery)
+	if query != "" {
+		p, serr := m.switchLocked(query)
+		if serr != nil {
+			unlock()
+			return nil, nil, serr
+		}
+		prof = p
+		alias = p.Name
+	} else {
+		// Keep the currently active Keychain login untouched, but derive a friendly alias if it matches a saved profile.
+		if pf, lerr := m.loadProfilesLocked(); lerr == nil {
+			if active, aerr := m.readActiveSlot(); aerr == nil && active != nil && active.Present {
+				for _, p := range pf.Profiles {
+					if active.Fingerprint == p.Fingerprint ||
+						(active.EmailHint != "" && p.Email != "" && strings.EqualFold(active.EmailHint, p.Email)) {
+						cp := *p
+						prof = &cp
+						alias = p.Name
+						break
+					}
+				}
+			}
+		}
+	}
+
+	sessName := ""
+	if tmuxBin := term.FindTmux(); tmuxBin != "" {
+		if reqSan := sanitizeProfileName(requestedTarget); reqSan != "" && !tmuxHasSession(tmuxBin, reqSan) {
+			sessName = reqSan
+		} else {
+			sessName = pickSessionName(tmuxBin, alias, resolvedCwd, false)
+		}
+	}
+
+	shellCmd := buildAgyShellCommand(agyBin, nil)
+	notifyLabel := "agy: " + alias
+	if sessName != "" {
+		notifyLabel = fmt.Sprintf("agy (%s): %s", alias, sessName)
+	}
+
+	return &RemoteLaunchPlan{
+		Profile:      prof,
+		AccountLabel: alias,
+		SessionName:  sessName,
+		Cwd:          resolvedCwd,
+		ShellCommand: shellCmd,
+		NotifyLabel:  notifyLabel,
+	}, unlock, nil
+}
+
+func resolveLaunchCwd(raw string) (string, error) {
+	home, _ := os.UserHomeDir()
+	cwd := strings.TrimSpace(raw)
+	switch {
+	case cwd == "" || cwd == "~":
+		cwd = home
+	case strings.HasPrefix(cwd, "~/"):
+		cwd = filepath.Join(home, cwd[2:])
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		cwd = abs
+	}
+	fi, err := os.Stat(cwd)
+	if err != nil {
+		return "", fmt.Errorf("工作目录不存在: %s", cwd)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("工作目录不是文件夹: %s", cwd)
+	}
+	return cwd, nil
+}
+
 // syncActiveBeforeSwitchLocked checks if the live Keychain slot holds a fresher refreshed token
 // for an existing saved profile (matched by email) and silently refreshes that profile's vault backup
 // so switching away never loses an updated access/refresh token.
@@ -723,8 +939,8 @@ func (m *Manager) Open(query string, opts OpenOptions) (*Profile, string, error)
 		cwd = abs
 	}
 
-	agyBin, err := exec.LookPath("agy")
-	if err != nil {
+	agyBin := FindAgyBinary()
+	if agyBin == "" {
 		return prof, "", errors.New("未在 PATH 中找到 agy 命令，请先安装 Antigravity CLI")
 	}
 
@@ -814,8 +1030,8 @@ func (m *Manager) LoginNew(alias, cwd string, force bool, customTTLMs *int64, wa
 	}
 	unlock()
 
-	agyBin, err := exec.LookPath("agy")
-	if err != nil {
+	agyBin := FindAgyBinary()
+	if agyBin == "" {
 		return nil, "", errors.New("未在 PATH 中找到 agy 命令，请先安装 Antigravity CLI")
 	}
 	if strings.TrimSpace(cwd) == "" {
@@ -1344,6 +1560,23 @@ func matchQuotaAccount(accts map[string]*usage.AgyAccountQuota, email, alias str
 				return nil
 			}
 			matched = aq
+		}
+	}
+	if matched != nil {
+		return matched
+	}
+	// Fallback: unique prefix match on the email local-part (for short aliases like "leng" -> "lengxxx@gmail.com").
+	if len(al) >= 3 {
+		for k, aq := range accts {
+			if k == "" || k == "default" {
+				continue
+			}
+			if strings.HasPrefix(k, al) {
+				if matched != nil {
+					return nil
+				}
+				matched = aq
+			}
 		}
 	}
 	return matched

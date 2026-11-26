@@ -13,6 +13,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.positionChange
 import kotlin.math.hypot
@@ -40,11 +43,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -53,14 +58,18 @@ import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -89,6 +98,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
+import com.phoneaiaudit.app.data.AgyProfileItem
+import com.phoneaiaudit.app.data.AgyProfilesResponse
 import com.phoneaiaudit.app.data.AuditRepository
 import com.phoneaiaudit.app.data.TerminalLaunchRequest
 import com.phoneaiaudit.app.data.TmuxSession
@@ -99,6 +110,7 @@ import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TerminalScreen(
@@ -108,10 +120,12 @@ fun TerminalScreen(
     val p = LocalIosPalette.current
     val status by AuditRepository.status.collectAsState()
     val sessions by AuditRepository.tmuxSessions.collectAsState()
+    val agyProfiles by AuditRepository.agyProfiles.collectAsState()
     val pendingLaunch by AuditRepository.pendingTerminalLaunch.collectAsState()
     val scope = rememberCoroutineScope()
 
     var activeRequest by remember { mutableStateOf<TerminalLaunchRequest?>(null) }
+    var activeSessionTarget by remember { mutableStateOf("") }
     var pendingTicket by remember { mutableStateOf<String?>(null) }
     var connected by remember { mutableStateOf(false) }
     var headerLabel by remember { mutableStateOf("未连接") }
@@ -127,6 +141,11 @@ fun TerminalScreen(
     var noteTarget by remember { mutableStateOf<TmuxSession?>(null) }
     var noteInput by remember { mutableStateOf("") }
     var killTargetName by remember { mutableStateOf<String?>(null) }
+
+    var showNewTerminalSheet by remember { mutableStateOf(false) }
+    var agyProfilesLoading by remember { mutableStateOf(false) }
+    var agyProfilesError by remember { mutableStateOf<String?>(null) }
+    var expiredConfirmTarget by remember { mutableStateOf<Pair<AgyProfileItem, String>?>(null) }
 
     val socketManager = remember {
         TerminalSocketManager(
@@ -148,6 +167,11 @@ fun TerminalScreen(
                     webViewRef.get()?.evaluateJavascript("window.setRemoteSize($cols, $rows);", null)
                 }
             },
+            onRemoteTarget = { remoteTarget ->
+                activity.runOnUiThread {
+                    activeSessionTarget = remoteTarget
+                }
+            },
             onStateChange = { ok, label ->
                 activity.runOnUiThread {
                     connected = ok
@@ -155,6 +179,20 @@ fun TerminalScreen(
                 }
             }
         )
+    }
+
+    fun refreshAgyAccounts(silent: Boolean = true) {
+        if (!status.macOnline) return
+        scope.launch {
+            agyProfilesLoading = true
+            AuditRepository.fetchAgyProfiles()
+                .onSuccess { agyProfilesError = null }
+                .onFailure {
+                    agyProfilesError = it.message ?: "读取失败"
+                    if (!silent) onShowSnack("刷新 agy 账号失败: ${it.message}")
+                }
+            agyProfilesLoading = false
+        }
     }
 
     LaunchedEffect(activeRequest) {
@@ -182,6 +220,7 @@ fun TerminalScreen(
                 tkRes.onSuccess { ticket ->
                     pendingTicket = ticket
                     isWideMode = true
+                    activeSessionTarget = req.target
                     activeRequest = req
                 }.onFailure {
                     onShowSnack("无法启动终端: ${it.message}")
@@ -189,10 +228,20 @@ fun TerminalScreen(
             }
         }
         if (AuditRepository.config.biometricForTerminal) {
+            val bioSubtitle = when {
+                req.mode == "new_agy" && req.agyAccount.isNotBlank() ->
+                    "新建 Antigravity 终端（账号: ${req.agyAccount}）"
+                req.mode == "new_agy" ->
+                    "新建 Antigravity 终端（当前默认账号）"
+                req.target.isNotBlank() ->
+                    "连接 tmux: ${req.target}"
+                else ->
+                    "新建 Mac 终端并同步弹出窗口"
+            }
             BiometricHelper.authenticate(
                 activity = activity,
                 title = "解锁 Mac 远程终端",
-                subtitle = if (req.target.isNotBlank()) "连接 tmux: ${req.target}" else "新建 Mac 终端并同步弹出窗口",
+                subtitle = bioSubtitle,
                 onSuccess = { launch() },
                 onError = { onShowSnack("已取消终端认证: $it") }
             )
@@ -205,15 +254,24 @@ fun TerminalScreen(
         socketManager.disconnect()
         webViewRef.set(null)
         activeRequest = null
+        activeSessionTarget = ""
         isLandscape = false
         isWideMode = true
         showFullKeyboard = false
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        scope.launch { AuditRepository.refreshTmuxSessions() }
+        scope.launch {
+            AuditRepository.refreshTmuxSessions()
+            if (status.macOnline) {
+                AuditRepository.fetchAgyProfiles()
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
         AuditRepository.refreshTmuxSessions()
+        if (status.macOnline) {
+            refreshAgyAccounts(silent = true)
+        }
     }
 
     LaunchedEffect(pendingLaunch) {
@@ -291,7 +349,8 @@ fun TerminalScreen(
                     onClick = {
                         val name = targetName
                         killTargetName = null
-                        val wasActive = activeRequest?.target == name
+                        val currentActiveTarget = activeSessionTarget.ifBlank { activeRequest?.target.orEmpty() }
+                        val wasActive = currentActiveTarget == name
                         scope.launch {
                             AuditRepository.killTmuxSession(name)
                                 .onSuccess {
@@ -305,6 +364,97 @@ fun TerminalScreen(
             },
             dismissButton = {
                 TextButton(onClick = { killTargetName = null }) { Text("取消", color = p.secondaryLabel) }
+            }
+        )
+    }
+
+    expiredConfirmTarget?.let { (prof, chosenCwd) ->
+        AlertDialog(
+            containerColor = p.card,
+            titleContentColor = p.label,
+            textContentColor = p.label,
+            onDismissRequest = { expiredConfirmTarget = null },
+            title = { Text("账号「${prof.name}」凭据可能已过期", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) },
+            text = {
+                Text(
+                    text = prof.expireWarning.ifBlank {
+                        "该账号登录凭据已过期或超期未续登，建议先在 Mac 终端运行 ai-audit agy login ${prof.name} 重新登录。仍要继续切换并加载吗？"
+                    },
+                    color = p.secondaryLabel,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+            },
+            confirmButton = {
+                IosButton(
+                    text = "仍要加载",
+                    containerColor = p.orange,
+                    onClick = {
+                        expiredConfirmTarget = null
+                        showNewTerminalSheet = false
+                        startTerminal(
+                            TerminalLaunchRequest(
+                                mode = "new_agy",
+                                agyAccount = prof.name,
+                                cwd = chosenCwd,
+                                displayTitle = "agy · ${prof.name}"
+                            )
+                        )
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { expiredConfirmTarget = null }) {
+                    Text("取消", color = p.secondaryLabel)
+                }
+            }
+        )
+    }
+
+    if (showNewTerminalSheet && activeRequest == null) {
+        NewTerminalSheet(
+            profiles = agyProfiles,
+            loading = agyProfilesLoading,
+            errorMsg = agyProfilesError,
+            sessions = sessions,
+            onRefresh = { refreshAgyAccounts(silent = false) },
+            onDismiss = { showNewTerminalSheet = false },
+            onSelectShell = { chosenCwd ->
+                showNewTerminalSheet = false
+                val newName = "phone-" + java.util.UUID.randomUUID().toString().replace("-", "").take(6)
+                startTerminal(
+                    TerminalLaunchRequest(
+                        mode = "new_shell",
+                        target = newName,
+                        cwd = chosenCwd
+                    )
+                )
+            },
+            onSelectDefaultAgy = { chosenCwd ->
+                showNewTerminalSheet = false
+                startTerminal(
+                    TerminalLaunchRequest(
+                        mode = "new_agy",
+                        agyAccount = "",
+                        cwd = chosenCwd,
+                        displayTitle = "Antigravity (agy)"
+                    )
+                )
+            },
+            onSelectAgyProfile = { prof, chosenCwd ->
+                if (prof.expired) {
+                    expiredConfirmTarget = prof to chosenCwd
+                } else {
+                    showNewTerminalSheet = false
+                    startTerminal(
+                        TerminalLaunchRequest(
+                            mode = "new_agy",
+                            agyAccount = prof.name,
+                            cwd = chosenCwd,
+                            displayTitle = "agy · ${prof.name}"
+                        )
+                    )
+                }
             }
         )
     }
@@ -323,6 +473,9 @@ fun TerminalScreen(
                             AuditRepository.refreshTmuxSessions()
                                 .onSuccess { list -> onShowSnack("刷新成功 · 共 ${list.size} 个终端") }
                                 .onFailure { onShowSnack("刷新失败: ${it.message}") }
+                            if (status.macOnline) {
+                                refreshAgyAccounts(silent = true)
+                            }
                         }
                     }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = p.accent)
@@ -337,12 +490,12 @@ fun TerminalScreen(
             ) {
                 item {
                     IosButton(
-                        text = "新建 Mac 终端（电脑端同步弹窗）",
+                        text = "新建 Mac 终端（可选 agy 账号 / Shell）",
                         icon = Icons.Default.Add,
                         enabled = status.macOnline && status.settings.terminalEnabled,
                         onClick = {
-                            val newName = "phone-" + java.util.UUID.randomUUID().toString().replace("-", "").take(6)
-                            startTerminal(TerminalLaunchRequest("new_shell", newName))
+                            showNewTerminalSheet = true
+                            refreshAgyAccounts(silent = true)
                         },
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -425,7 +578,7 @@ fun TerminalScreen(
         }
     }
 
-    val activeTargetName = activeRequest?.target.orEmpty()
+    val activeTargetName = activeSessionTarget.ifBlank { activeRequest?.target.orEmpty() }
     val matchedSession = remember(sessions, activeTargetName) {
         sessions.firstOrNull { it.name == activeTargetName }
     }
@@ -564,7 +717,16 @@ fun TerminalScreen(
                                     val tk = pendingTicket
                                     if (req != null && tk != null) {
                                         pendingTicket = null
-                                        socketManager.connect(tk, req.mode, req.target, cols, rows)
+                                        socketManager.connect(
+                                            ticket = tk,
+                                            mode = req.mode,
+                                            target = req.target,
+                                            cols = cols,
+                                            rows = rows,
+                                            agyAccount = req.agyAccount,
+                                            cwd = req.cwd,
+                                            displayLabel = req.displayTitle
+                                        )
                                     } else {
                                         socketManager.resize(cols, rows)
                                     }
@@ -1489,5 +1651,492 @@ private fun TmuxSessionRow(
                 Icon(Icons.Default.DeleteOutline, contentDescription = "关闭终端", tint = p.red, modifier = Modifier.size(19.dp))
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NewTerminalSheet(
+    profiles: AgyProfilesResponse?,
+    loading: Boolean,
+    errorMsg: String?,
+    sessions: List<TmuxSession>,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+    onSelectShell: (cwd: String) -> Unit,
+    onSelectDefaultAgy: (cwd: String) -> Unit,
+    onSelectAgyProfile: (profile: AgyProfileItem, cwd: String) -> Unit
+) {
+    val p = LocalIosPalette.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val agyBlue = Color(0xFF4F7CFF)
+
+    var selectedCwd by remember { mutableStateOf("") }
+    var useCustomCwd by remember { mutableStateOf(false) }
+    var customCwdInput by remember { mutableStateOf("") }
+
+    val quickCwds = remember(sessions, profiles) {
+        val home = profiles?.defaultCwd.orEmpty().trimEnd('/')
+        val seen = linkedSetOf<String>()
+        val out = mutableListOf<Pair<String, String>>()
+        out.add("" to "默认 (~)")
+        fun addPath(raw: String) {
+            val cleaned = raw.trim().trimEnd('/')
+            if (cleaned.isBlank() || cleaned == home || !seen.add(cleaned)) return
+            val label = cleaned.substringAfterLast('/').ifBlank { cleaned }
+            out.add(cleaned to label)
+        }
+        sessions.forEach { addPath(it.cwd) }
+        profiles?.suggestedCwds?.forEach { addPath(it) }
+        out
+    }
+
+    val effectiveCwd = if (useCustomCwd) customCwdInput.trim() else selectedCwd
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = p.bg,
+        contentColor = p.label,
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Sheet Title Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "新建 Mac 终端",
+                        color = p.label,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "选择要加载的 Antigravity 账号或普通 Shell，电脑端将同步弹窗",
+                        color = p.secondaryLabel,
+                        fontSize = 12.sp
+                    )
+                }
+                IconButton(onClick = onRefresh, enabled = !loading) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = p.accent
+                        )
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "刷新账号列表", tint = p.accent)
+                    }
+                }
+            }
+
+            // Optional Working Directory Quick Picker
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = p.secondaryLabel, modifier = Modifier.size(14.dp))
+                        Text("工作目录", color = p.secondaryLabel, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                    }
+                    if (effectiveCwd.isNotBlank()) {
+                        Text(
+                            text = effectiveCwd,
+                            color = p.tertiaryLabel,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    quickCwds.forEach { (path, label) ->
+                        val isSelected = !useCustomCwd && selectedCwd == path
+                        Surface(
+                            onClick = {
+                                useCustomCwd = false
+                                selectedCwd = path
+                            },
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (isSelected) p.accent else p.card,
+                            border = BorderStroke(
+                                0.6.dp,
+                                if (isSelected) p.accent else p.separator.copy(alpha = 0.75f)
+                            )
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) Color.White else p.label,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = { useCustomCwd = !useCustomCwd },
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (useCustomCwd) p.accent else p.card,
+                        border = BorderStroke(
+                            0.6.dp,
+                            if (useCustomCwd) p.accent else p.separator.copy(alpha = 0.75f)
+                        )
+                    ) {
+                        Text(
+                            text = "自定义路径",
+                            color = if (useCustomCwd) Color.White else p.secondaryLabel,
+                            fontSize = 12.sp,
+                            fontWeight = if (useCustomCwd) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+                if (useCustomCwd) {
+                    OutlinedTextField(
+                        value = customCwdInput,
+                        onValueChange = { customCwdInput = it },
+                        placeholder = { Text("例如：~/zb/code/wk/my_project", fontSize = 13.sp, color = p.secondaryLabel) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = p.accent,
+                            unfocusedBorderColor = p.separator,
+                            focusedTextColor = p.label,
+                            unfocusedTextColor = p.label,
+                            focusedContainerColor = p.card,
+                            unfocusedContainerColor = p.card
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            // Section 1: Antigravity (agy) Account Picker
+            val savedList = profiles?.profiles.orEmpty()
+            val agyFooter = when {
+                profiles == null && errorMsg != null ->
+                    "读取 Mac 账号列表失败（$errorMsg）；请确认中转服务与 Mac 守护进程均已更新，或直接启动当前默认 agy。"
+                profiles != null && !profiles.agyInstalled ->
+                    "请在 Mac 安装 Antigravity CLI（agy）后重试。"
+                savedList.isEmpty() ->
+                    "在 Mac 终端运行 ai-audit agy save <别名> 或 ai-audit agy login <别名> 保存多账号后，即可在此一键选号启动。"
+                else ->
+                    "选择账号将自动切换 Mac Keychain 全局槽位并加载对应 agy（不影响已运行的其他终端）。"
+            }
+
+            IosSection(
+                title = if (savedList.isNotEmpty()) "加载 Antigravity · 选择 agy 账号 (${savedList.size})" else "加载 Antigravity (agy)",
+                footer = agyFooter
+            ) {
+                when {
+                    profiles == null && loading -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = agyBlue)
+                            Text("正在读取 Mac 已保存的 agy 账号...", color = p.secondaryLabel, fontSize = 13.5.sp)
+                        }
+                    }
+
+                    profiles == null -> {
+                        // Fallback when profile list couldn't be fetched yet
+                        AgyDefaultActionRow(
+                            title = "启动当前默认 Antigravity (agy)",
+                            subtitle = "不切换钥匙串，直接使用 Mac 当前登录态加载 agy",
+                            badgeText = null,
+                            badgeColor = agyBlue,
+                            onClick = { onSelectDefaultAgy(effectiveCwd) }
+                        )
+                    }
+
+                    !profiles.agyInstalled -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Mac 未检测到 agy 命令", color = p.secondaryLabel, fontSize = 14.sp)
+                        }
+                    }
+
+                    else -> {
+                        savedList.forEachIndexed { idx, prof ->
+                            AgyAccountPickerRow(
+                                profile = prof,
+                                agyColor = agyBlue,
+                                onClick = { onSelectAgyProfile(prof, effectiveCwd) }
+                            )
+                            if (idx < savedList.lastIndex || profiles.activeUnsaved) {
+                                IosDivider(startIndent = 16.dp)
+                            }
+                        }
+
+                        if (savedList.isEmpty() || profiles.activeUnsaved) {
+                            val title = if (profiles.activeUnsaved) {
+                                "当前活跃 agy"
+                            } else {
+                                "启动默认 Antigravity (agy)"
+                            }
+                            val sub = when {
+                                profiles.activeEmail.isNotBlank() ->
+                                    "当前登录：${profiles.activeEmail}（直接加载，不切换账号）"
+                                profiles.activePresent ->
+                                    "使用 Mac 当前 Keychain 登录态直接加载 agy"
+                                else ->
+                                    "启动 agy（未检测到已登录凭据，可在终端内完成登录）"
+                            }
+                            AgyDefaultActionRow(
+                                title = title,
+                                subtitle = sub,
+                                badgeText = if (profiles.activeUnsaved) "未存档案" else null,
+                                badgeColor = p.orange,
+                                onClick = { onSelectDefaultAgy(effectiveCwd) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Section 2: Plain Shell Terminal
+            IosSection(title = "普通终端") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectShell(effectiveCwd) }
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(p.secondaryFill),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Terminal, contentDescription = null, tint = p.label, modifier = Modifier.size(19.dp))
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "普通 Shell 终端 (zsh)",
+                                color = p.label,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "新建空白交互终端，不自动启动 AI",
+                                color = p.secondaryLabel,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = p.tertiaryLabel,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgyAccountPickerRow(
+    profile: AgyProfileItem,
+    agyColor: Color,
+    onClick: () -> Unit
+) {
+    val p = LocalIosPalette.current
+    val dotColor = when {
+        profile.expired -> p.red
+        profile.expiringSoon -> p.orange
+        profile.active -> p.green
+        else -> agyColor
+    }
+    val quotaText = remember(profile.quota5h, profile.quotaWeekly) {
+        buildList {
+            if (profile.quota5h.isNotBlank()) add("5h ${profile.quota5h}")
+            if (profile.quotaWeekly.isNotBlank()) add("周 ${profile.quotaWeekly}")
+        }.joinToString(" · ")
+    }
+    val shortTier = remember(profile.planTier) {
+        val raw = profile.planTier.trim()
+        when {
+            raw.contains("ultra", ignoreCase = true) -> "ULTRA"
+            raw.contains("pro", ignoreCase = true) -> "PRO"
+            raw.length > 14 -> raw.take(14)
+            else -> raw
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f).padding(end = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(dotColor))
+                Text(
+                    text = profile.name,
+                    color = p.label,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (profile.active) {
+                    IosPillBadge(text = "当前", color = p.green)
+                }
+                if (shortTier.isNotBlank()) {
+                    IosPillBadge(text = shortTier, color = agyColor)
+                }
+                if (profile.expired) {
+                    IosPillBadge(text = "已过期", color = p.red)
+                } else if (profile.expiringSoon) {
+                    IosPillBadge(text = "快到期", color = p.orange)
+                }
+            }
+            if (profile.email.isNotBlank()) {
+                Text(
+                    text = profile.email,
+                    color = p.secondaryLabel,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (quotaText.isNotBlank()) {
+                Text(
+                    text = quotaText,
+                    color = agyColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (profile.expired || profile.expiringSoon || (quotaText.isBlank() && profile.expireSummary.isNotBlank())) {
+                val expColor = when {
+                    profile.expired -> p.red
+                    profile.expiringSoon -> p.orange
+                    else -> p.tertiaryLabel
+                }
+                val prefix = when {
+                    profile.expired -> "✖ "
+                    profile.expiringSoon -> "⚠ "
+                    else -> ""
+                }
+                Text(
+                    text = prefix + profile.expireSummary,
+                    color = expColor,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "选择并启动",
+            tint = p.tertiaryLabel,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
+private fun AgyDefaultActionRow(
+    title: String,
+    subtitle: String,
+    badgeText: String?,
+    badgeColor: Color,
+    onClick: () -> Unit
+) {
+    val p = LocalIosPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f).padding(end = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(badgeColor))
+                Text(
+                    text = title,
+                    color = p.label,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!badgeText.isNullOrBlank()) {
+                    IosPillBadge(text = badgeText, color = badgeColor)
+                }
+            }
+            Text(
+                text = subtitle,
+                color = p.secondaryLabel,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "启动",
+            tint = p.tertiaryLabel,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }

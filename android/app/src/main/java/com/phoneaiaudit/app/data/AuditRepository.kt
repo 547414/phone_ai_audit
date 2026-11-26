@@ -78,6 +78,9 @@ object AuditRepository {
     private val _usageSummary = MutableStateFlow<UsageSummary?>(null)
     val usageSummary: StateFlow<UsageSummary?> = _usageSummary.asStateFlow()
 
+    private val _agyProfiles = MutableStateFlow<AgyProfilesResponse?>(null)
+    val agyProfiles: StateFlow<AgyProfilesResponse?> = _agyProfiles.asStateFlow()
+
     fun setTerminalActive(active: Boolean) {
         _isTerminalActive.value = active
     }
@@ -795,6 +798,20 @@ object AuditRepository {
                 val summary = UsageSummary.fromJson(JSONObject(body))
                 _usageSummary.value = summary
                 summary
+            }
+        }
+    }
+
+    suspend fun fetchAgyProfiles(): Result<AgyProfilesResponse> = withContext(Dispatchers.IO) {
+        if (!config.isConfigured()) return@withContext Result.failure(IllegalStateException("未配置服务器"))
+        runCatching {
+            val req = authedRequest("/api/v1/terminals/agy-profiles").get().build()
+            httpClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error(parseErrorMsg(resp.code, body))
+                val parsed = AgyProfilesResponse.fromJson(JSONObject(body))
+                _agyProfiles.value = parsed
+                parsed
             }
         }
     }

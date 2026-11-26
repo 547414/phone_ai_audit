@@ -349,3 +349,128 @@ func TestFSRPCAndBinaryStreaming(t *testing.T) {
 		t.Fatalf("unexpected stream resp: code=%d range=%q body=%q", sresp.StatusCode, sresp.Header.Get("Content-Range"), string(sbody))
 	}
 }
+
+func TestAgyProfilesRPCAndNewAgyTerminalOpen(t *testing.T) {
+	srv, cfg, cleanup := newTestServer(t)
+	defer cleanup()
+
+	// Disable FilesEnabled while keeping TerminalEnabled=true: agy-profiles must still succeed!
+	resp := doJSON(t, "PUT", srv.URL+"/api/v1/settings", cfg.AppToken, map[string]any{
+		"files_enabled":    false,
+		"terminal_enabled": true,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 updating settings, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	macHdr := http.Header{"Authorization": []string{"Bearer " + cfg.MacToken}}
+	macConn, _, err := websocket.DefaultDialer.Dial(wsURL(srv.URL, "/api/v1/ws/mac"), macHdr)
+	if err != nil {
+		t.Fatalf("dial mac ws: %v", err)
+	}
+	defer macConn.Close()
+	_, _, _ = macConn.ReadMessage() // drain initial settings.updated
+
+	openReceived := make(chan map[string]any, 1)
+	go func() {
+		for {
+			_, raw, err := macConn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg map[string]any
+			if json.Unmarshal(raw, &msg) != nil {
+				continue
+			}
+			switch msg["type"] {
+			case "rpc.req":
+				if msg["op"] == "agy.profiles" {
+					_ = macConn.WriteJSON(map[string]any{
+						"type":   "rpc.resp",
+						"req_id": msg["req_id"],
+						"status": 200,
+						"data": map[string]any{
+							"agy_installed": true,
+							"profiles": []map[string]any{
+								{"name": "268zhb", "email": "268zhb@gmail.com", "active": true},
+								{"name": "crysug55", "email": "crysug55@gmail.com", "active": false},
+							},
+						},
+					})
+				}
+			case "term.open":
+				openReceived <- msg
+				_ = macConn.WriteJSON(map[string]any{
+					"type":      "term.opened",
+					"stream_id": msg["stream_id"],
+					"target":    "agy-crysug55-demo",
+					"cols":      135,
+					"rows":      35,
+				})
+			}
+		}
+	}()
+
+	// 1. Fetch agy profiles via app endpoint
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/terminals/agy-profiles", cfg.AppToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 agy-profiles even when files_enabled=false, got %d", resp.StatusCode)
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(bodyBytes), `"crysug55"`) {
+		t.Fatalf("unexpected agy-profiles resp: %s", string(bodyBytes))
+	}
+
+	// 2. Open new_agy terminal with specific agy_account & cwd -> Mac receives both, App gets resolved target
+	tkResp := doJSON(t, "POST", srv.URL+"/api/v1/terminals/ticket", cfg.AppToken, nil)
+	var tk struct {
+		Ticket string `json:"ticket"`
+	}
+	_ = json.NewDecoder(tkResp.Body).Decode(&tk)
+	_ = tkResp.Body.Close()
+
+	termHdr := http.Header{
+		"Authorization":     []string{"Bearer " + cfg.AppToken},
+		"X-Terminal-Ticket": []string{tk.Ticket},
+	}
+	termConn, _, err := websocket.DefaultDialer.Dial(wsURL(srv.URL, "/api/v1/ws/terminal"), termHdr)
+	if err != nil {
+		t.Fatalf("dial terminal ws: %v", err)
+	}
+	defer termConn.Close()
+
+	_ = termConn.WriteJSON(map[string]any{
+		"type":        "open",
+		"mode":        "new_agy",
+		"agy_account": "crysug55",
+		"cwd":         "/Users/crysu/demo",
+		"cols":        135,
+		"rows":        35,
+	})
+
+	select {
+	case macOpen := <-openReceived:
+		if macOpen["mode"] != "new_agy" || macOpen["agy_account"] != "crysug55" || macOpen["cwd"] != "/Users/crysu/demo" {
+			t.Fatalf("unexpected term.open forwarded to mac: %+v", macOpen)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for term.open on mac")
+	}
+
+	_ = termConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, openedRaw, err := termConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read opened from relay: %v", err)
+	}
+	var opened struct {
+		Type   string `json:"type"`
+		Target string `json:"target"`
+		Cols   int    `json:"cols"`
+		Rows   int    `json:"rows"`
+	}
+	if err := json.Unmarshal(openedRaw, &opened); err != nil || opened.Type != "opened" || opened.Target != "agy-crysug55-demo" || opened.Cols != 135 {
+		t.Fatalf("unexpected opened frame: %s", string(openedRaw))
+	}
+}

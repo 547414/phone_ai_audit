@@ -204,9 +204,86 @@ data class StatusSnapshot(
 }
 
 data class TerminalLaunchRequest(
-    val mode: String, // "tmux_attach" or "new_shell"
-    val target: String = ""
+    val mode: String, // "tmux_attach", "new_shell", or "new_agy"
+    val target: String = "",
+    val agyAccount: String = "",
+    val cwd: String = "",
+    val displayTitle: String = ""
 )
+
+data class AgyProfileItem(
+    val name: String,
+    val email: String = "",
+    val active: Boolean = false,
+    val planTier: String = "",
+    val quota5h: String = "",
+    val quotaWeekly: String = "",
+    val savedAt: Long = 0L,
+    val lastUsedAt: Long = 0L,
+    val expired: Boolean = false,
+    val expiringSoon: Boolean = false,
+    val hardExpiry: Boolean = false,
+    val expireSummary: String = "",
+    val expireWarning: String = ""
+) {
+    companion object {
+        fun fromJson(o: JSONObject): AgyProfileItem = AgyProfileItem(
+            name = o.optString("name"),
+            email = o.optString("email"),
+            active = o.optBoolean("active", false),
+            planTier = o.optString("plan_tier"),
+            quota5h = o.optString("quota_5h"),
+            quotaWeekly = o.optString("quota_weekly"),
+            savedAt = o.optLong("saved_at", 0L),
+            lastUsedAt = o.optLong("last_used_at", 0L),
+            expired = o.optBoolean("expired", false),
+            expiringSoon = o.optBoolean("expiring_soon", false),
+            hardExpiry = o.optBoolean("hard_expiry", false),
+            expireSummary = o.optString("expire_summary"),
+            expireWarning = o.optString("expire_warning")
+        )
+    }
+}
+
+data class AgyProfilesResponse(
+    val agyInstalled: Boolean = true,
+    val activePresent: Boolean = false,
+    val activeEmail: String = "",
+    val activeProfile: String = "",
+    val activeUnsaved: Boolean = false,
+    val defaultCwd: String = "",
+    val suggestedCwds: List<String> = emptyList(),
+    val profiles: List<AgyProfileItem> = emptyList()
+) {
+    companion object {
+        fun fromJson(o: JSONObject): AgyProfilesResponse {
+            val cwds = mutableListOf<String>()
+            val cArr = o.optJSONArray("suggested_cwds")
+            if (cArr != null) {
+                for (i in 0 until cArr.length()) {
+                    cArr.optString(i).takeIf { it.isNotBlank() }?.let { cwds.add(it) }
+                }
+            }
+            val items = mutableListOf<AgyProfileItem>()
+            val pArr = o.optJSONArray("profiles")
+            if (pArr != null) {
+                for (i in 0 until pArr.length()) {
+                    pArr.optJSONObject(i)?.let { items.add(AgyProfileItem.fromJson(it)) }
+                }
+            }
+            return AgyProfilesResponse(
+                agyInstalled = o.optBoolean("agy_installed", true),
+                activePresent = o.optBoolean("active_present", false),
+                activeEmail = o.optString("active_email"),
+                activeProfile = o.optString("active_profile"),
+                activeUnsaved = o.optBoolean("active_unsaved", false),
+                defaultCwd = o.optString("default_cwd"),
+                suggestedCwds = cwds,
+                profiles = items
+            )
+        }
+    }
+}
 
 data class FileOpenRequest(
     val path: String,

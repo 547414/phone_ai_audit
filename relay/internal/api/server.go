@@ -71,6 +71,7 @@ func (s *Server) routes() {
 
 	// Terminals
 	s.mux.HandleFunc("GET /api/v1/terminals/sessions", s.requireApp(s.handleListTmuxSessions))
+	s.mux.HandleFunc("GET /api/v1/terminals/agy-profiles", s.requireApp(s.handleListAgyProfiles))
 	s.mux.HandleFunc("PUT /api/v1/terminals/sessions/{name}/note", s.requireApp(s.handleSetTerminalNote))
 	s.mux.HandleFunc("DELETE /api/v1/terminals/sessions/{name}", s.requireApp(s.handleKillTmuxSession))
 	s.mux.HandleFunc("POST /api/v1/terminals/ticket", s.requireApp(s.handleIssueTerminalTicket))
@@ -412,6 +413,10 @@ func (s *Server) handleListTmuxSessions(w http.ResponseWriter, r *http.Request) 
 		"mac_online": online,
 		"sessions":   sessions,
 	})
+}
+
+func (s *Server) handleListAgyProfiles(w http.ResponseWriter, r *http.Request) {
+	s.writeRPC(w, s.hub.CallMacRPC(r.Context(), "agy.profiles", nil))
 }
 
 func (s *Server) handleSetTerminalNote(w http.ResponseWriter, r *http.Request) {

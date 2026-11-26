@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"phone-ai-audit/mac-agent/internal/agyauth"
 	"phone-ai-audit/mac-agent/internal/agywatch"
 	"phone-ai-audit/mac-agent/internal/awake"
 	"phone-ai-audit/mac-agent/internal/config"
@@ -52,6 +53,7 @@ type Daemon struct {
 	termMgr    *term.Manager
 	fsMgr      *fsengine.Engine
 	usageMgr   *usage.Engine
+	agyMgr     *agyauth.Manager
 	agyWatcher *agywatch.Watcher
 
 	mu       sync.Mutex
@@ -78,6 +80,7 @@ func newDaemon(cfg config.Config) *Daemon {
 			WebURL:   cfg.WebURL(),
 			ProxyURL: cfg.ProxyURL,
 		}),
+		agyMgr: agyauth.New(agyauth.Options{}),
 		settings: proto.Settings{
 			ApprovalMode:       "auto",
 			IdleThresholdSec:   60,
@@ -360,12 +363,14 @@ func (d *Daemon) handleRelayText(ctx context.Context, data []byte) {
 		Params   json.RawMessage `json:"params"`
 		Settings *proto.Settings `json:"settings"`
 		Approval *proto.Approval `json:"approval"`
-		StreamID string          `json:"stream_id"`
-		Mode     string          `json:"mode"`
-		Target   string          `json:"target"`
-		Cols     int             `json:"cols"`
-		Rows     int             `json:"rows"`
-		Reason   string          `json:"reason"`
+		StreamID   string          `json:"stream_id"`
+		Mode       string          `json:"mode"`
+		Target     string          `json:"target"`
+		AgyAccount string          `json:"agy_account"`
+		Cwd        string          `json:"cwd"`
+		Cols       int             `json:"cols"`
+		Rows       int             `json:"rows"`
+		Reason     string          `json:"reason"`
 		// FS stream open params
 		Path   string `json:"path"`
 		Kind   string `json:"kind"`
@@ -423,20 +428,7 @@ func (d *Daemon) handleRelayText(ctx context.Context, data []byte) {
 			"tmux_sessions": sessions,
 		})
 	case "term.open":
-		if actualCols, actualRows, err := d.termMgr.Open(env.StreamID, env.Mode, env.Target, env.Cols, env.Rows); err != nil {
-			d.sendJSON(map[string]any{
-				"type":      "term.error",
-				"stream_id": env.StreamID,
-				"error":     err.Error(),
-			})
-		} else {
-			d.sendJSON(map[string]any{
-				"type":      "term.opened",
-				"stream_id": env.StreamID,
-				"cols":      actualCols,
-				"rows":      actualRows,
-			})
-		}
+		go d.handleTermOpen(env.StreamID, env.Mode, env.Target, env.AgyAccount, env.Cwd, env.Cols, env.Rows)
 	case "term.resize":
 		d.termMgr.Resize(env.StreamID, env.Cols, env.Rows)
 	case "term.close":
@@ -462,6 +454,88 @@ func (d *Daemon) handleRelayText(ctx context.Context, data []byte) {
 			delete(d.fsStreams, env.StreamID)
 		}
 		d.mu.Unlock()
+	}
+}
+
+func (d *Daemon) handleTermOpen(streamID, mode, target, agyAccount, cwd string, cols, rows int) {
+	openReq := term.OpenRequest{
+		StreamID: streamID,
+		Mode:     mode,
+		Target:   target,
+		Cwd:      cwd,
+		Cols:     cols,
+		Rows:     rows,
+	}
+
+	var releaseAgyLock func()
+	if mode == "new_agy" {
+		if !d.termMgr.Enabled() {
+			d.sendJSON(map[string]any{
+				"type":      "term.error",
+				"stream_id": streamID,
+				"error":     "远程终端已在设置中关闭",
+			})
+			return
+		}
+		plan, unlock, err := d.agyMgr.PrepareRemoteLaunch(agyAccount, cwd, target)
+		if err != nil {
+			d.sendJSON(map[string]any{
+				"type":      "term.error",
+				"stream_id": streamID,
+				"error":     err.Error(),
+			})
+			return
+		}
+		releaseAgyLock = unlock
+		openReq.Target = plan.SessionName
+		openReq.Cwd = plan.Cwd
+		openReq.ShellCommand = plan.ShellCommand
+		openReq.NotifyLabel = plan.NotifyLabel
+	}
+
+	res, err := d.termMgr.OpenWithOptions(openReq)
+	if err != nil {
+		if releaseAgyLock != nil {
+			releaseAgyLock()
+		}
+		d.sendJSON(map[string]any{
+			"type":      "term.error",
+			"stream_id": streamID,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	if releaseAgyLock != nil {
+		// Hold the agyauth lock briefly in background so agy finishes reading the global Keychain slot
+		// without blocking live terminal output to the phone.
+		go func() {
+			time.Sleep(1500 * time.Millisecond)
+			releaseAgyLock()
+		}()
+	}
+
+	opened := map[string]any{
+		"type":      "term.opened",
+		"stream_id": streamID,
+		"cols":      res.Cols,
+		"rows":      res.Rows,
+	}
+	if res.Target != "" {
+		opened["target"] = res.Target
+	}
+	d.sendJSON(opened)
+
+	if mode != "tmux_attach" {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			d.sendJSON(map[string]any{
+				"type":          "mac.heartbeat",
+				"hostname":      d.cfg.Hostname,
+				"awake":         d.awake.Enabled(),
+				"tmux_sessions": term.ListTmuxSessions(),
+			})
+		}()
 	}
 }
 
@@ -510,6 +584,17 @@ func (d *Daemon) dispatchRPC(ctx context.Context, op string, rawParams json.RawM
 			return http.StatusInternalServerError, nil, err.Error()
 		}
 		return http.StatusOK, sum, ""
+
+	case "agy.profiles":
+		if !d.termMgr.Enabled() {
+			return http.StatusForbidden, nil, "远程终端已在设置中关闭"
+		}
+		home, _ := os.UserHomeDir()
+		snap, err := d.agyMgr.SnapshotForRemote(home, d.fsMgr.Roots())
+		if err != nil {
+			return http.StatusInternalServerError, nil, err.Error()
+		}
+		return http.StatusOK, snap, ""
 
 	case "fs.roots":
 		return http.StatusOK, map[string]any{

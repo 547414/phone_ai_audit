@@ -1004,8 +1004,17 @@ func (h *Hub) handleMacBinary(data []byte) {
 
 func (h *Hub) CallMacRPC(ctx context.Context, op string, params any) RPCResult {
 	cfg, err := h.store.GetSettings(ctx)
-	if err == nil && !cfg.FilesEnabled {
-		return RPCResult{Status: 403, Error: "远程文件与 Git 功能已在控制面板关闭"}
+	if err == nil {
+		switch {
+		case strings.HasPrefix(op, "fs."), strings.HasPrefix(op, "git."):
+			if !cfg.FilesEnabled {
+				return RPCResult{Status: 403, Error: "远程文件与 Git 功能已在控制面板关闭"}
+			}
+		case strings.HasPrefix(op, "agy."), strings.HasPrefix(op, "term."):
+			if !cfg.TerminalEnabled {
+				return RPCResult{Status: 403, Error: "远程终端已在控制面板关闭"}
+			}
+		}
 	}
 	h.mu.RLock()
 	mac := h.mac
@@ -1122,6 +1131,7 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 		ResumeSec     int                 `json:"resume_sec"`
 		Message       *model.Message      `json:"message"`
 		StreamID      string              `json:"stream_id"`
+		Target        string              `json:"target"`
 		Cols          int                 `json:"cols"`
 		Rows          int                 `json:"rows"`
 		Reason        string              `json:"reason"`
@@ -1219,12 +1229,21 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 			st := h.streams[sid]
 			h.mu.RUnlock()
 			if st != nil {
-				st.app.enqueueJSON(map[string]any{
+				if env.Target != "" {
+					st.mu.Lock()
+					st.target = env.Target
+					st.mu.Unlock()
+				}
+				frame := map[string]any{
 					"type":      "opened",
 					"stream_id": env.StreamID,
 					"cols":      env.Cols,
 					"rows":      env.Rows,
-				})
+				}
+				if env.Target != "" {
+					frame["target"] = env.Target
+				}
+				st.app.enqueueJSON(frame)
 			}
 		}
 	case "term.closed", "term.error":
@@ -1235,6 +1254,18 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 			}
 			if reason == "" {
 				reason = "mac_closed"
+			}
+			if env.Type == "term.error" {
+				h.mu.RLock()
+				st := h.streams[sid]
+				h.mu.RUnlock()
+				if st != nil {
+					st.app.enqueueJSON(map[string]any{
+						"type":      "error",
+						"stream_id": env.StreamID,
+						"error":     reason,
+					})
+				}
 			}
 			h.closeTerminalStream(ctx, sid, reason, false)
 		}
@@ -1339,12 +1370,14 @@ func (h *Hub) ServeTerminalWS(ctx context.Context, conn *websocket.Conn, clientI
 			continue
 		}
 		var req struct {
-			Type   string `json:"type"`
-			Mode   string `json:"mode"`
-			Target string `json:"target"`
-			Cols   int    `json:"cols"`
-			Rows   int    `json:"rows"`
-			Data   string `json:"data"`
+			Type       string `json:"type"`
+			Mode       string `json:"mode"`
+			Target     string `json:"target"`
+			AgyAccount string `json:"agy_account"`
+			Cwd        string `json:"cwd"`
+			Cols       int    `json:"cols"`
+			Rows       int    `json:"rows"`
+			Data       string `json:"data"`
 		}
 		if json.Unmarshal(data, &req) != nil {
 			continue
@@ -1367,9 +1400,17 @@ func (h *Hub) ServeTerminalWS(ctx context.Context, conn *websocket.Conn, clientI
 				appClient.enqueueJSON(map[string]any{"type": "error", "error": "Mac 守护进程未在线"})
 				return
 			}
+			auditTarget := req.Target
+			if auditTarget == "" && req.Mode == "new_agy" {
+				if acct := strings.TrimSpace(req.AgyAccount); acct != "" {
+					auditTarget = "agy:" + acct
+				} else {
+					auditTarget = "agy:default"
+				}
+			}
 			st.mu.Lock()
 			st.mode = req.Mode
-			st.target = req.Target
+			st.target = auditTarget
 			needAudit := !st.auditOpened
 			st.auditOpened = true
 			st.mu.Unlock()
@@ -1378,19 +1419,26 @@ func (h *Hub) ServeTerminalWS(ctx context.Context, conn *websocket.Conn, clientI
 					ID:       NewID(),
 					StreamID: sidHex,
 					Mode:     req.Mode,
-					Target:   req.Target,
+					Target:   auditTarget,
 					OpenedAt: time.Now().UnixMilli(),
 					ClientIP: clientIP,
 				})
 			}
-			mac.enqueueJSON(map[string]any{
+			openFrame := map[string]any{
 				"type":      "term.open",
 				"stream_id": sidHex,
 				"mode":      req.Mode,
 				"target":    req.Target,
 				"cols":      req.Cols,
 				"rows":      req.Rows,
-			})
+			}
+			if req.AgyAccount != "" {
+				openFrame["agy_account"] = req.AgyAccount
+			}
+			if req.Cwd != "" {
+				openFrame["cwd"] = req.Cwd
+			}
+			mac.enqueueJSON(openFrame)
 		case "input":
 			h.forwardAppStdin(sid, []byte(req.Data))
 		case "resize":

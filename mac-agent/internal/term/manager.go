@@ -453,17 +453,83 @@ func queryTmuxWindowSize(tmuxBin, target string) (int, int) {
 	return w, h
 }
 
-func (m *Manager) Open(streamIDHex, mode, target string, cols, rows int) (int, int, error) {
-	if !m.Enabled() {
-		return 0, 0, errors.New("远程终端已在设置中关闭")
+type OpenRequest struct {
+	StreamID     string
+	Mode         string // "tmux_attach", "new_shell", "new_agy"
+	Target       string
+	Cwd          string
+	ShellCommand string
+	NotifyLabel  string
+	Cols         int
+	Rows         int
+}
+
+type OpenResult struct {
+	Cols   int
+	Rows   int
+	Target string
+}
+
+func resolveTermCwd(raw string) (string, error) {
+	home, _ := os.UserHomeDir()
+	cwd := strings.TrimSpace(raw)
+	switch {
+	case cwd == "" || cwd == "~":
+		return home, nil
+	case strings.HasPrefix(cwd, "~/"):
+		cwd = filepath.Join(home, cwd[2:])
 	}
-	raw, err := hex.DecodeString(streamIDHex)
+	if abs, err := filepath.Abs(cwd); err == nil {
+		cwd = abs
+	}
+	fi, err := os.Stat(cwd)
+	if err != nil {
+		return "", fmt.Errorf("工作目录不存在: %s", cwd)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("工作目录不是文件夹: %s", cwd)
+	}
+	return cwd, nil
+}
+
+func sanitizeNewSessionName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+		}
+	}
+	return strings.Trim(b.String(), "-_.")
+}
+
+func (m *Manager) Open(streamIDHex, mode, target string, cols, rows int) (int, int, error) {
+	res, err := m.OpenWithOptions(OpenRequest{
+		StreamID: streamIDHex,
+		Mode:     mode,
+		Target:   target,
+		Cols:     cols,
+		Rows:     rows,
+	})
+	return res.Cols, res.Rows, err
+}
+
+func (m *Manager) OpenWithOptions(req OpenRequest) (OpenResult, error) {
+	if !m.Enabled() {
+		return OpenResult{}, errors.New("远程终端已在设置中关闭")
+	}
+	raw, err := hex.DecodeString(req.StreamID)
 	if err != nil || len(raw) != 16 {
-		return 0, 0, errors.New("invalid stream_id")
+		return OpenResult{}, errors.New("invalid stream_id")
 	}
 	var sid [16]byte
 	copy(sid[:], raw)
 
+	cols := req.Cols
+	rows := req.Rows
 	if cols <= 0 {
 		cols = 135
 	}
@@ -471,35 +537,42 @@ func (m *Manager) Open(streamIDHex, mode, target string, cols, rows int) (int, i
 		rows = 35
 	}
 
-	home, _ := os.UserHomeDir()
+	cwd, err := resolveTermCwd(req.Cwd)
+	if err != nil {
+		return OpenResult{}, err
+	}
+
 	tmuxBin := FindTmux()
 	var cmd *exec.Cmd
-	notifyLabel := "新建终端"
+	notifyLabel := strings.TrimSpace(req.NotifyLabel)
 	openMacGUISession := ""
+	resolvedTarget := strings.TrimSpace(req.Target)
 
-	switch mode {
+	switch req.Mode {
 	case "tmux_attach":
 		if tmuxBin == "" {
-			return 0, 0, errors.New("Mac 未安装 tmux")
+			return OpenResult{}, errors.New("Mac 未安装 tmux")
 		}
-		if target == "" {
-			return 0, 0, errors.New("未指定 tmux 会话名称")
+		if resolvedTarget == "" {
+			return OpenResult{}, errors.New("未指定 tmux 会话名称")
 		}
 		// Match Mac's existing tmux window dimensions so Mac never shrinks or shows dotted padding.
-		if w, h := queryTmuxWindowSize(tmuxBin, target); w > 0 && h > 0 {
+		if w, h := queryTmuxWindowSize(tmuxBin, resolvedTarget); w > 0 && h > 0 {
 			cols, rows = w, h
 		}
-		notifyLabel = "tmux: " + target
+		if notifyLabel == "" {
+			notifyLabel = "tmux: " + resolvedTarget
+		}
 		if sock := findTmuxSocket(); sock != "" {
-			cmd = exec.Command(tmuxBin, "-S", sock, "attach-session", "-t", target)
+			cmd = exec.Command(tmuxBin, "-S", sock, "attach-session", "-t", resolvedTarget)
 		} else {
-			cmd = exec.Command(tmuxBin, "attach-session", "-t", target)
+			cmd = exec.Command(tmuxBin, "attach-session", "-t", resolvedTarget)
 		}
 	default:
 		if tmuxBin != "" {
-			sessName := target
+			sessName := sanitizeNewSessionName(resolvedTarget)
 			if sessName == "" {
-				sessName = "phone-" + streamIDHex[:6]
+				sessName = "phone-" + req.StreamID[:6]
 			}
 			// Default new Mac sessions to desktop size (135x35) so Mac GUI Terminal matches cleanly with zero dots.
 			if cols < 120 {
@@ -508,18 +581,34 @@ func (m *Manager) Open(streamIDHex, mode, target string, cols, rows int) (int, i
 			if rows < 30 {
 				rows = 35
 			}
-			notifyLabel = "新建 tmux: " + sessName
-			openMacGUISession = sessName
-			if sock := findTmuxSocket(); sock != "" {
-				cmd = exec.Command(tmuxBin, "-S", sock, "new-session", "-A", "-s", sessName)
-			} else {
-				cmd = exec.Command(tmuxBin, "new-session", "-A", "-s", sessName)
+			if notifyLabel == "" {
+				notifyLabel = "新建 tmux: " + sessName
 			}
+			openMacGUISession = sessName
+			resolvedTarget = sessName
+
+			args := []string{}
+			if sock := findTmuxSocket(); sock != "" {
+				args = append(args, "-S", sock)
+			}
+			args = append(args, "new-session", "-A", "-s", sessName, "-c", cwd)
+			if strings.TrimSpace(req.ShellCommand) != "" {
+				args = append(args, "--", "/bin/zsh", "-lc", req.ShellCommand)
+			}
+			cmd = exec.Command(tmuxBin, args...)
 		} else {
-			cmd = exec.Command("/bin/zsh", "-l")
+			resolvedTarget = ""
+			if notifyLabel == "" {
+				notifyLabel = "新建终端"
+			}
+			if strings.TrimSpace(req.ShellCommand) != "" {
+				cmd = exec.Command("/bin/zsh", "-lc", req.ShellCommand)
+			} else {
+				cmd = exec.Command("/bin/zsh", "-l")
+			}
 		}
 	}
-	cmd.Dir = home
+	cmd.Dir = cwd
 	cmd.Env = enrichedEnv()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
@@ -527,11 +616,11 @@ func (m *Manager) Open(streamIDHex, mode, target string, cols, rows int) (int, i
 		Cols: uint16(cols),
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("start pty: %w", err)
+		return OpenResult{}, fmt.Errorf("start pty: %w", err)
 	}
 
 	sess := &session{
-		idHex: streamIDHex,
+		idHex: req.StreamID,
 		idRaw: sid,
 		ptmx:  ptmx,
 		cmd:   cmd,
@@ -563,13 +652,13 @@ func (m *Manager) Open(streamIDHex, mode, target string, cols, rows int) (int, i
 				if !errors.Is(err, io.EOF) {
 					reason = err.Error()
 				}
-				m.Close(streamIDHex, reason, true)
+				m.Close(req.StreamID, reason, true)
 				return
 			}
 		}
 	}()
 
-	return cols, rows, nil
+	return OpenResult{Cols: cols, Rows: rows, Target: resolvedTarget}, nil
 }
 
 func (m *Manager) WriteStdin(sid [16]byte, data []byte) {

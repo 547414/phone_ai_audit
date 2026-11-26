@@ -14,13 +14,23 @@ class TerminalSocketManager(
     private val onOutputBase64: (String) -> Unit,
     private val onSystemLine: (String) -> Unit,
     private val onRemoteSize: (cols: Int, rows: Int) -> Unit,
+    private val onRemoteTarget: (String) -> Unit = {},
     private val onStateChange: (connected: Boolean, label: String) -> Unit
 ) {
     private var ws: WebSocket? = null
     @Volatile
     private var isOpen = false
 
-    fun connect(ticket: String, mode: String, target: String, cols: Int, rows: Int) {
+    fun connect(
+        ticket: String,
+        mode: String,
+        target: String,
+        cols: Int,
+        rows: Int,
+        agyAccount: String = "",
+        cwd: String = "",
+        displayLabel: String = ""
+    ) {
         disconnect()
         val cfg = AuditRepository.config
         val req = Request.Builder()
@@ -37,11 +47,20 @@ class TerminalSocketManager(
                     put("type", "open")
                     put("mode", mode)
                     put("target", target)
+                    if (agyAccount.isNotBlank()) put("agy_account", agyAccount)
+                    if (cwd.isNotBlank()) put("cwd", cwd)
                     put("cols", cols.coerceAtLeast(20))
                     put("rows", rows.coerceAtLeast(10))
                 }
                 webSocket.send(openPayload.toString())
-                onStateChange(true, target.ifBlank { "新建 Mac 终端" })
+                val initialLabel = when {
+                    displayLabel.isNotBlank() -> displayLabel
+                    target.isNotBlank() -> target
+                    mode == "new_agy" && agyAccount.isNotBlank() -> "agy · $agyAccount"
+                    mode == "new_agy" -> "Antigravity (agy)"
+                    else -> "新建 Mac 终端"
+                }
+                onStateChange(true, initialLabel)
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -57,6 +76,11 @@ class TerminalSocketManager(
                         val r = obj.optInt("rows", 0)
                         if (c >= 20 && r >= 8) {
                             onRemoteSize(c, r)
+                        }
+                        val remoteTarget = obj.optString("target").trim()
+                        if (remoteTarget.isNotBlank()) {
+                            onRemoteTarget(remoteTarget)
+                            onStateChange(true, remoteTarget)
                         }
                     }
                     "error" -> {
