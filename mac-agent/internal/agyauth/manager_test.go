@@ -235,6 +235,17 @@ func TestBinaryPayloadPreservationAndHelpers(t *testing.T) {
 	if q := quoteSecurityArg(`foo "bar" \baz`); q != `"foo \"bar\" \\baz"` {
 		t.Fatalf("unexpected quoteSecurityArg: %q", q)
 	}
+
+	// Verify trusted-app writes omit -U (recreated after Delete) to avoid macOS SecKeychainItemSetAccess prompts,
+	// while vault writes without trusted apps keep atomic -U.
+	lineWithTrusted := buildAddGenericPasswordLine("gemini", "antigravity", []byte("abc"), []string{"/usr/bin/security", "/usr/local/bin/agy"}, false)
+	if strings.Contains(lineWithTrusted, " -U ") || !strings.Contains(lineWithTrusted, `-T "/usr/bin/security"`) || !strings.Contains(lineWithTrusted, `-T "/usr/local/bin/agy"`) {
+		t.Fatalf("unexpected trusted add line: %q", lineWithTrusted)
+	}
+	lineVault := buildAddGenericPasswordLine("phone-ai-audit-agy", "work", []byte("abc"), nil, true)
+	if !strings.Contains(lineVault, "add-generic-password -U ") || strings.Contains(lineVault, " -T ") {
+		t.Fatalf("unexpected vault update line: %q", lineVault)
+	}
 }
 
 func TestResolveProfileDisambiguation(t *testing.T) {

@@ -97,30 +97,22 @@ func (s *MacOSKeychainStore) Set(service, account string, secret []byte, trusted
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Build a single `security -i` command line so `-X <hex>` is delivered over stdin instead of argv.
-	var parts []string
-	parts = append(parts, "add-generic-password", "-U",
-		"-s", quoteSecurityArg(service),
-		"-a", quoteSecurityArg(account),
-		"-X", hex.EncodeToString(secret),
-	)
-	seenApp := make(map[string]struct{}, len(trustedApps)+1)
-	for _, app := range trustedApps {
-		app = strings.TrimSpace(app)
-		if app == "" {
-			continue
+	validTrusted := filterExistingFiles(trustedApps)
+
+	// On macOS, calling `add-generic-password -U` WITH `-T <app>` on an existing Keychain item
+	// invokes SecKeychainItemSetAccess() to modify the existing item's ACL, which always pops up
+	// an interactive login Keychain password dialog ("security wants to use the login keychain").
+	// Deleting the existing item first and creating a fresh item with the initial `-T` ACL avoids
+	// modifying an existing ACL and completes silently without any password prompt.
+	updateInPlace := true
+	if len(validTrusted) > 0 {
+		if err := s.Delete(service, account); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
 		}
-		// SecTrustedApplicationCreateFromPath fails with ENOENT if any -T path does not exist on disk.
-		if fi, err := os.Stat(app); err != nil || fi.IsDir() {
-			continue
-		}
-		if _, dup := seenApp[app]; dup {
-			continue
-		}
-		seenApp[app] = struct{}{}
-		parts = append(parts, "-T", quoteSecurityArg(app))
+		updateInPlace = false
 	}
-	line := strings.Join(parts, " ") + "\n"
+
+	line := buildAddGenericPasswordLine(service, account, secret, validTrusted, updateInPlace)
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, s.bin(), "-i")
@@ -135,6 +127,45 @@ func (s *MacOSKeychainStore) Set(service, account string, secret []byte, trusted
 		return fmt.Errorf("security add-generic-password (%s/%s): %s", service, account, errTxt)
 	}
 	return nil
+}
+
+func filterExistingFiles(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, app := range paths {
+		app = strings.TrimSpace(app)
+		if app == "" {
+			continue
+		}
+		// SecTrustedApplicationCreateFromPath fails with ENOENT if any -T path does not exist on disk.
+		if fi, err := os.Stat(app); err != nil || fi.IsDir() {
+			continue
+		}
+		if _, dup := seen[app]; dup {
+			continue
+		}
+		seen[app] = struct{}{}
+		out = append(out, app)
+	}
+	return out
+}
+
+func buildAddGenericPasswordLine(service, account string, secret []byte, trustedApps []string, updateInPlace bool) string {
+	// Build a single `security -i` command line so `-X <hex>` is delivered over stdin instead of argv.
+	parts := make([]string, 0, 10+len(trustedApps)*2)
+	parts = append(parts, "add-generic-password")
+	if updateInPlace {
+		parts = append(parts, "-U")
+	}
+	parts = append(parts,
+		"-s", quoteSecurityArg(service),
+		"-a", quoteSecurityArg(account),
+		"-X", hex.EncodeToString(secret),
+	)
+	for _, app := range trustedApps {
+		parts = append(parts, "-T", quoteSecurityArg(app))
+	}
+	return strings.Join(parts, " ") + "\n"
 }
 
 func (s *MacOSKeychainStore) Delete(service, account string) error {
