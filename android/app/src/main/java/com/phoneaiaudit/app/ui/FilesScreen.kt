@@ -24,18 +24,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.Sort
@@ -49,6 +53,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -65,8 +70,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,6 +81,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import com.phoneaiaudit.app.data.AuditRepository
+import com.phoneaiaudit.app.data.DownloadTaskState
+import com.phoneaiaudit.app.data.FileDownloadManager
 import com.phoneaiaudit.app.data.FileOpenRequest
 import com.phoneaiaudit.app.data.FsEntry
 import com.phoneaiaudit.app.data.FsListResult
@@ -88,10 +97,12 @@ fun FilesScreen(
     onShowSnack: (String) -> Unit
 ) {
     val p = LocalIosPalette.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val status by AuditRepository.status.collectAsState()
     val tmuxSessions by AuditRepository.tmuxSessions.collectAsState()
     val pendingOpen by AuditRepository.pendingFileOpen.collectAsState()
+    val downloadState by FileDownloadManager.state.collectAsState()
 
     var unlocked by remember { mutableStateOf(!AuditRepository.config.biometricForFiles) }
     var currentPath by remember { mutableStateOf("") }
@@ -242,7 +253,7 @@ fun FilesScreen(
     }
     val activeRootLabel = remember(activeRoot) { formatRootLabel(activeRoot) }
     val shortSubtitle = remember(currentPath, activeRoot, activeRootLabel) {
-        if (currentPath.isBlank()) "远程免下载浏览"
+        if (currentPath.isBlank()) "远程文件浏览与下载"
         else if (activeRoot.isNotBlank() && currentPath.startsWith(activeRoot)) {
             activeRootLabel + currentPath.removePrefix(activeRoot)
         } else currentPath
@@ -319,6 +330,12 @@ fun FilesScreen(
                 }
             }
             return
+        }
+
+        downloadState?.let { dl ->
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                DownloadStatusBanner(state = dl, onShowSnack = onShowSnack)
+            }
         }
 
         LazyColumn(
@@ -501,10 +518,31 @@ fun FilesScreen(
                                         .padding(horizontal = 14.dp, vertical = 11.dp),
                                     verticalArrangement = Arrangement.spacedBy(3.dp)
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(hit.name, color = p.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        if (hit.line > 0) {
-                                            IosPillBadge("L${hit.line}", p.accent)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(hit.name, color = p.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            if (hit.line > 0) {
+                                                IosPillBadge("L${hit.line}", p.accent)
+                                            }
+                                        }
+                                        if (!hit.isDir) {
+                                            IconButton(
+                                                onClick = {
+                                                    FileDownloadManager.startDownload(context, hit.path, hit.name)
+                                                    onShowSnack("开始下载 ${hit.name}")
+                                                },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(Icons.Default.Download, contentDescription = "下载", tint = p.accent, modifier = Modifier.size(18.dp))
+                                            }
                                         }
                                     }
                                     Text(hit.relPath, color = p.secondaryLabel, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -565,6 +603,10 @@ fun FilesScreen(
                                                 } else {
                                                     activeFile = FileOpenRequest(entry.path, kindHint = entry.kind)
                                                 }
+                                            },
+                                            onDownload = {
+                                                FileDownloadManager.startDownload(context, entry.path, entry.name)
+                                                onShowSnack("开始下载 ${entry.name}")
                                             },
                                             onViewDiff = {
                                                 val root = gitRepo?.root.orEmpty()
@@ -734,10 +776,144 @@ private fun GitRepoBanner(repo: GitRepoInfo, onOpenWorkbench: () -> Unit) {
 }
 
 @Composable
+internal fun DownloadStatusBanner(
+    state: DownloadTaskState,
+    onShowSnack: (String) -> Unit,
+    darkSurface: Boolean = false
+) {
+    val p = LocalIosPalette.current
+    val context = LocalContext.current
+    val bgColor = if (darkSurface) Color(0xFF1C1C1E) else p.card
+    val titleColor = if (darkSurface) Color.White else p.label
+    val subColor = if (darkSurface) Color(0xFFAEAEB2) else p.secondaryLabel
+    val borderColor = when {
+        state.error != null -> p.red.copy(alpha = 0.5f)
+        state.finished != null -> p.green.copy(alpha = 0.55f)
+        else -> p.accent.copy(alpha = 0.45f)
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = bgColor,
+        border = BorderStroke(0.8.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = when {
+                        state.finished != null -> Icons.Default.CheckCircle
+                        state.error != null -> Icons.Default.Close
+                        else -> Icons.Default.Download
+                    },
+                    contentDescription = null,
+                    tint = when {
+                        state.finished != null -> p.green
+                        state.error != null -> p.red
+                        else -> p.accent
+                    },
+                    modifier = Modifier.size(18.dp)
+                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = when {
+                            state.finished != null -> "下载完成 · ${state.fileName}"
+                            state.error != null -> "下载失败 · ${state.fileName}"
+                            else -> "正在下载 · ${state.fileName}"
+                        },
+                        color = titleColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val detail = when {
+                        state.finished != null -> "已保存至 ${state.finished.relativePath} (${formatFileSize(state.finished.sizeBytes)})"
+                        state.error != null -> state.error
+                        state.totalBytes > 0L -> {
+                            val pct = ((state.bytesRead * 100L) / state.totalBytes).coerceIn(0L, 100L)
+                            "${formatFileSize(state.bytesRead)} / ${formatFileSize(state.totalBytes)} · $pct%"
+                        }
+                        else -> "已接收 ${formatFileSize(state.bytesRead)}..."
+                    }
+                    Text(detail, color = if (state.error != null) p.red else subColor, fontSize = 11.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (state.isDownloading) {
+                    TextButton(onClick = { FileDownloadManager.cancelDownload() }) {
+                        Text("取消", color = p.red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    IconButton(onClick = { FileDownloadManager.dismiss() }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭", tint = subColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            if (state.isDownloading) {
+                val prog = state.progress
+                if (prog != null) {
+                    LinearProgressIndicator(
+                        progress = { prog },
+                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                        color = p.accent,
+                        trackColor = p.secondaryFill
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                        color = p.accent,
+                        trackColor = p.secondaryFill
+                    )
+                }
+            } else if (state.finished != null) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IosTintedButton(
+                        text = "打开文件",
+                        icon = Icons.Default.OpenInNew,
+                        tint = p.accent,
+                        onClick = {
+                            FileDownloadManager.openDownloadedFile(context, state.finished)
+                                .onFailure { onShowSnack("未找到可打开该文件的应用，可到系统「下载/PhoneAiAudit」目录查看") }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IosTintedButton(
+                        text = "分享",
+                        icon = Icons.Default.Share,
+                        tint = p.green,
+                        onClick = {
+                            FileDownloadManager.shareDownloadedFile(context, state.finished)
+                                .onFailure { onShowSnack("分享失败: ${it.message}") }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            } else if (state.error != null) {
+                IosTintedButton(
+                    text = "重新下载",
+                    icon = Icons.Default.Download,
+                    tint = p.accent,
+                    onClick = { FileDownloadManager.startDownload(context, state.remotePath, state.fileName) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun FileEntryRow(
     entry: FsEntry,
     inGitRepo: Boolean,
     onClick: () -> Unit,
+    onDownload: () -> Unit,
     onViewDiff: () -> Unit,
     onRename: () -> Unit,
     onTrash: () -> Unit
@@ -785,6 +961,13 @@ private fun FileEntryRow(
                 Icon(Icons.Default.MoreVert, contentDescription = "更多", tint = p.tertiaryLabel, modifier = Modifier.size(18.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                if (!entry.isDir) {
+                    DropdownMenuItem(
+                        text = { Text("下载到手机", color = p.accent, fontWeight = FontWeight.Medium) },
+                        leadingIcon = { Icon(Icons.Default.Download, null, tint = p.accent, modifier = Modifier.size(18.dp)) },
+                        onClick = { menuOpen = false; onDownload() }
+                    )
+                }
                 if (inGitRepo && !entry.isDir && entry.gitStatus.isNotBlank()) {
                     DropdownMenuItem(
                         text = { Text("查看 Git Diff") },

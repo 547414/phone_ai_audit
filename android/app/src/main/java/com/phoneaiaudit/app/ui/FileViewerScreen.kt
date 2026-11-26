@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.WrapText
 import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Hd
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -63,6 +64,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -97,6 +99,7 @@ import androidx.media3.ui.PlayerView
 import com.phoneaiaudit.app.data.AuditRepository
 import com.phoneaiaudit.app.data.ExcelMeta
 import com.phoneaiaudit.app.data.ExcelSheetData
+import com.phoneaiaudit.app.data.FileDownloadManager
 import com.phoneaiaudit.app.data.FsConflictException
 import com.phoneaiaudit.app.data.FsReadResult
 import com.phoneaiaudit.app.data.PdfMeta
@@ -114,32 +117,55 @@ fun FileViewerScreen(
     onBack: () -> Unit,
     onShowSnack: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val fileName = remember(path) { path.substringAfterLast('/') }
+    val downloadState by FileDownloadManager.state.collectAsState()
     var effectiveKind by remember(path, kindHint) {
         mutableStateOf(kindHint.ifBlank { inferKindFromName(fileName) })
     }
+    val onDownload: () -> Unit = {
+        FileDownloadManager.startDownload(context, path, fileName)
+        onShowSnack("开始下载 $fileName")
+    }
+    val isDarkViewer = effectiveKind in setOf("image", "video", "audio")
 
-    when (effectiveKind) {
-        "code", "markdown" -> TextMarkdownViewer(
-            path = path,
-            fileName = fileName,
-            isMarkdown = effectiveKind == "markdown",
-            jumpLine = jumpLine,
-            onBack = onBack,
-            onShowSnack = onShowSnack
-        )
-        "image" -> ImageStreamViewer(path = path, fileName = fileName, onBack = onBack, onShowSnack = onShowSnack)
-        "pdf" -> PdfStreamViewer(path = path, fileName = fileName, onBack = onBack, onShowSnack = onShowSnack)
-        "excel" -> ExcelViewer(path = path, fileName = fileName, onBack = onBack, onShowSnack = onShowSnack)
-        "word" -> WordHtmlViewer(path = path, fileName = fileName, onBack = onBack)
-        "pptx" -> PptxOutlineViewer(path = path, fileName = fileName, onBack = onBack)
-        "video", "audio" -> MediaStreamViewer(path = path, fileName = fileName, isAudio = effectiveKind == "audio", onBack = onBack)
-        else -> BinaryFallbackViewer(
-            path = path,
-            fileName = fileName,
-            onTryText = { effectiveKind = "code" },
-            onBack = onBack
-        )
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (effectiveKind) {
+            "code", "markdown" -> TextMarkdownViewer(
+                path = path,
+                fileName = fileName,
+                isMarkdown = effectiveKind == "markdown",
+                jumpLine = jumpLine,
+                onDownload = onDownload,
+                onBack = onBack,
+                onShowSnack = onShowSnack
+            )
+            "image" -> ImageStreamViewer(path = path, fileName = fileName, onDownload = onDownload, onBack = onBack, onShowSnack = onShowSnack)
+            "pdf" -> PdfStreamViewer(path = path, fileName = fileName, onDownload = onDownload, onBack = onBack, onShowSnack = onShowSnack)
+            "excel" -> ExcelViewer(path = path, fileName = fileName, onDownload = onDownload, onBack = onBack, onShowSnack = onShowSnack)
+            "word" -> WordHtmlViewer(path = path, fileName = fileName, onDownload = onDownload, onBack = onBack)
+            "pptx" -> PptxOutlineViewer(path = path, fileName = fileName, onDownload = onDownload, onBack = onBack)
+            "video", "audio" -> MediaStreamViewer(path = path, fileName = fileName, isAudio = effectiveKind == "audio", onDownload = onDownload, onBack = onBack)
+            else -> BinaryFallbackViewer(
+                path = path,
+                fileName = fileName,
+                onDownload = onDownload,
+                onTryText = { effectiveKind = "code" },
+                onBack = onBack
+            )
+        }
+
+        downloadState?.let { dl ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                DownloadStatusBanner(state = dl, onShowSnack = onShowSnack, darkSurface = isDarkViewer)
+            }
+        }
     }
 }
 
@@ -173,6 +199,7 @@ private fun TextMarkdownViewer(
     fileName: String,
     isMarkdown: Boolean,
     jumpLine: Int,
+    onDownload: () -> Unit,
     onBack: () -> Unit,
     onShowSnack: (String) -> Unit
 ) {
@@ -306,6 +333,9 @@ private fun TextMarkdownViewer(
                 }
             }
             if (!editing) {
+                IconButton(onClick = onDownload) {
+                    Icon(Icons.Default.Download, contentDescription = "下载到手机", tint = p.accent)
+                }
                 if (!isMarkdown) {
                     IconButton(onClick = { showSearch = !showSearch }) {
                         Icon(Icons.Default.Search, contentDescription = "页内搜索", tint = if (showSearch) p.accent else p.secondaryLabel)
@@ -545,6 +575,7 @@ private fun TextMarkdownViewer(
 private fun ImageStreamViewer(
     path: String,
     fileName: String,
+    onDownload: () -> Unit,
     onBack: () -> Unit,
     onShowSnack: (String) -> Unit
 ) {
@@ -593,6 +624,9 @@ private fun ImageStreamViewer(
                 onShowSnack(if (originalMode) "正在加载无损原图流..." else "已切回压缩流")
             }) {
                 Text(if (originalMode) "切回压缩" else "看原图", color = Color(0xFF0A84FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            IconButton(onClick = onDownload) {
+                Icon(Icons.Default.Download, contentDescription = "下载原图", tint = Color(0xFF0A84FF))
             }
         }
 
@@ -659,6 +693,7 @@ private fun ZoomableBitmapView(bitmap: Bitmap) {
 private fun PdfStreamViewer(
     path: String,
     fileName: String,
+    onDownload: () -> Unit,
     onBack: () -> Unit,
     onShowSnack: (String) -> Unit
 ) {
@@ -744,6 +779,9 @@ private fun PdfStreamViewer(
                 onShowSnack(if (highDpi) "已切换高清 220 DPI" else "已切换标准 160 DPI")
             }) {
                 Icon(Icons.Default.Hd, contentDescription = "高清 DPI", tint = if (highDpi) p.accent else p.secondaryLabel)
+            }
+            IconButton(onClick = onDownload) {
+                Icon(Icons.Default.Download, contentDescription = "下载 PDF", tint = p.accent)
             }
         }
         HorizontalDivider(thickness = 0.5.dp, color = p.separator)
@@ -846,6 +884,7 @@ private fun PdfStreamViewer(
 private fun ExcelViewer(
     path: String,
     fileName: String,
+    onDownload: () -> Unit,
     onBack: () -> Unit,
     onShowSnack: (String) -> Unit
 ) {
@@ -909,6 +948,9 @@ private fun ExcelViewer(
                     color = p.secondaryLabel,
                     fontSize = 11.sp
                 )
+            }
+            IconButton(onClick = onDownload) {
+                Icon(Icons.Default.Download, contentDescription = "下载表格", tint = p.accent)
             }
         }
 
@@ -1102,7 +1144,7 @@ private fun colIndexToLetter(col1: Int): String {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun WordHtmlViewer(path: String, fileName: String, onBack: () -> Unit) {
+private fun WordHtmlViewer(path: String, fileName: String, onDownload: () -> Unit, onBack: () -> Unit) {
     val p = LocalIosPalette.current
     val webViewRef = remember { AtomicReference<WebView?>(null) }
     var htmlBody by remember { mutableStateOf<String?>(null) }
@@ -1128,7 +1170,7 @@ private fun WordHtmlViewer(path: String, fileName: String, onBack: () -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().background(p.bg).navigationBarsPadding()) {
-        SimpleViewerHeader(title = fileName, subtitle = "macOS textutil 实时流式排版", onBack = onBack)
+        SimpleViewerHeader(title = fileName, subtitle = "macOS textutil 实时流式排版", onDownload = onDownload, onBack = onBack)
         HorizontalDivider(thickness = 0.5.dp, color = p.separator)
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             AndroidView(
@@ -1158,7 +1200,7 @@ private fun WordHtmlViewer(path: String, fileName: String, onBack: () -> Unit) {
 // =========================================================================
 
 @Composable
-private fun PptxOutlineViewer(path: String, fileName: String, onBack: () -> Unit) {
+private fun PptxOutlineViewer(path: String, fileName: String, onDownload: () -> Unit, onBack: () -> Unit) {
     val p = LocalIosPalette.current
     var outline by remember { mutableStateOf<PptxOutline?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -1178,6 +1220,7 @@ private fun PptxOutlineViewer(path: String, fileName: String, onBack: () -> Unit
         SimpleViewerHeader(
             title = fileName,
             subtitle = if (outline != null) "共 ${outline!!.slides.size} 页幻灯片大纲" else "解析中...",
+            onDownload = onDownload,
             onBack = onBack
         )
         HorizontalDivider(thickness = 0.5.dp, color = p.separator)
@@ -1215,7 +1258,7 @@ private fun PptxOutlineViewer(path: String, fileName: String, onBack: () -> Unit
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun MediaStreamViewer(path: String, fileName: String, isAudio: Boolean, onBack: () -> Unit) {
+private fun MediaStreamViewer(path: String, fileName: String, isAudio: Boolean, onDownload: () -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val streamUrl = remember(path) { AuditRepository.buildStreamUrl(path, kind = "raw") }
 
@@ -1250,7 +1293,10 @@ private fun MediaStreamViewer(path: String, fileName: String, isAudio: Boolean, 
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(fileName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (isAudio) "音频 HTTP Range 边播边流（不落手机存储）" else "视频 HTTP Range 边播边流（不落手机存储）", color = Color(0xFF98989F), fontSize = 11.sp)
+                Text(if (isAudio) "音频 HTTP Range 边播边流" else "视频 HTTP Range 边播边流", color = Color(0xFF98989F), fontSize = 11.sp)
+            }
+            IconButton(onClick = onDownload) {
+                Icon(Icons.Default.Download, contentDescription = "下载媒体文件", tint = Color(0xFF0A84FF))
             }
         }
 
@@ -1278,13 +1324,14 @@ private fun MediaStreamViewer(path: String, fileName: String, isAudio: Boolean, 
 private fun BinaryFallbackViewer(
     path: String,
     fileName: String,
+    onDownload: () -> Unit,
     onTryText: () -> Unit,
     onBack: () -> Unit
 ) {
     val p = LocalIosPalette.current
     BackHandler { onBack() }
     Column(modifier = Modifier.fillMaxSize().background(p.bg).navigationBarsPadding()) {
-        SimpleViewerHeader(title = fileName, subtitle = "二进制/未知格式", onBack = onBack)
+        SimpleViewerHeader(title = fileName, subtitle = "二进制/未知格式", onDownload = onDownload, onBack = onBack)
         HorizontalDivider(thickness = 0.5.dp, color = p.separator)
         Column(
             modifier = Modifier.fillMaxSize().padding(28.dp),
@@ -1295,15 +1342,17 @@ private fun BinaryFallbackViewer(
             Spacer(Modifier.height(12.dp))
             Text(fileName, color = p.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Text("该格式暂不支持直接预览（本工具严格不下载文件到手机存储）", color = p.secondaryLabel, fontSize = 13.sp)
+            Text("该格式暂不支持直接预览，可下载到手机 Download/PhoneAiAudit 目录本地打开", color = p.secondaryLabel, fontSize = 13.sp)
             Spacer(Modifier.height(20.dp))
+            IosButton(text = "下载到手机", icon = Icons.Default.Download, onClick = onDownload)
+            Spacer(Modifier.height(10.dp))
             IosTintedButton(text = "尝试作为纯文本打开", onClick = onTryText)
         }
     }
 }
 
 @Composable
-private fun SimpleViewerHeader(title: String, subtitle: String, onBack: () -> Unit) {
+private fun SimpleViewerHeader(title: String, subtitle: String, onDownload: (() -> Unit)? = null, onBack: () -> Unit) {
     val p = LocalIosPalette.current
     Row(
         modifier = Modifier
@@ -1319,6 +1368,11 @@ private fun SimpleViewerHeader(title: String, subtitle: String, onBack: () -> Un
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = p.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = p.secondaryLabel, fontSize = 11.sp, maxLines = 1)
+        }
+        if (onDownload != null) {
+            IconButton(onClick = onDownload) {
+                Icon(Icons.Default.Download, contentDescription = "下载到手机", tint = p.accent)
+            }
         }
     }
 }
