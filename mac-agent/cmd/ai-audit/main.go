@@ -29,8 +29,26 @@ func main() {
 		printHelp()
 		return
 	}
-	if os.Args[1] == "agy" {
+	switch os.Args[1] {
+	case "help", "-h", "--help":
+		if len(os.Args) >= 3 {
+			printSubcommandHelp(os.Args[2])
+		} else {
+			printHelp()
+		}
+		return
+	case "agy":
 		cmdAgy(os.Args[2:])
+		return
+	case "completion":
+		cmdCompletion(os.Args[2:])
+		return
+	case "__complete":
+		cmdInternalComplete(os.Args[2:])
+		return
+	}
+	if len(os.Args) >= 3 && (os.Args[2] == "-h" || os.Args[2] == "--help" || os.Args[2] == "help") {
+		printSubcommandHelp(os.Args[1])
 		return
 	}
 	cfg, err := config.Load()
@@ -104,10 +122,11 @@ func main() {
 
 func printHelp() {
 	fmt.Println(`Phone AI Audit Mac 控制命令:
+  ai-audit help [子命令]                  查看完整帮助或指定子命令详细用法
   ai-audit status                         查看中转状态、手机在线数、当前模式、tmux 会话
   ai-audit usage                          查看 Claude / Codex / Antigravity 用量与配额重置时间
   ai-audit web                            在浏览器打开本机 Agent 用量看板网页
-  ai-audit agy [ls|save|login|switch|open|rm]  管理多 Antigravity 账号并一键切换/新开终端
+  ai-audit agy [ls|save|login|switch|open|ttl|rm]  管理多 Antigravity 账号并一键切换/新开终端
   ai-audit mode auto|both|phone|notify    切换审批模式 (智能离座 / 双端同步 / 始终手机 / 仅通知)
   ai-audit timeout <秒>                   设置审批弹窗超时时长 (5-600秒，默认 30 秒，Mac/手机同步生效)
   ai-audit auto-approve on|off            开启/关闭超时自动确认授权 (默认开启)
@@ -116,7 +135,8 @@ func printHelp() {
   ai-audit files on|off                   开启/关闭远程文件查看/编辑与 Git 操作总开关
   ai-audit pair                           打印 Android App 扫码配对二维码与配置信息
   ai-audit test-msg                       发送一条测试消息到手机
-  ai-audit test-approve                   发起一次测试远程审批并等待决策`)
+  ai-audit test-approve                   发起一次测试远程审批并等待决策
+  ai-audit completion install|zsh|bash    安装或输出终端 Tab 自动补全脚本`)
 }
 
 func client() *http.Client {

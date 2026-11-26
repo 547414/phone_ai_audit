@@ -36,6 +36,7 @@ if [[ -x "$ROOT_DIR/dist/ai-audit-prompt" ]]; then
   install -m 755 "$ROOT_DIR/dist/ai-audit-prompt" "$BIN_DIR/ai-audit-prompt"
 fi
 install -m 755 "$SCRIPT_DIR/ai-tmux" "$BIN_DIR/ai-tmux"
+"$BIN_DIR/ai-audit" completion install >/dev/null 2>&1 || true
 
 echo "==> 2. 备份现有配置到 $BACKUP_DIR"
 [[ -f "$HOME/.claude/settings.json" ]] && cp -p "$HOME/.claude/settings.json" "$BACKUP_DIR/claude-settings.json.bak"

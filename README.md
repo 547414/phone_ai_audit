@@ -271,6 +271,13 @@ swiftc -O mac-agent/prompt/main.swift -o dist/ai-audit-prompt
 ### 1. Mac 端核心口令
 
 ```bash
+# 查看全部命令帮助或单个子命令详细用法
+ai-audit help
+ai-audit help agy
+
+# 安装终端 Zsh Tab 自动补全（支持动态补全已保存的 agy 账号别名，install.sh 已默认自动安装）
+ai-audit completion install
+
 # 查看中转、手机在线状态、当前审批模式与活跃 tmux 会话
 ai-audit status
 
