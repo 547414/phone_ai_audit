@@ -885,7 +885,10 @@ func buildAgyShellCommand(agyBin string, extraArgs []string) string {
 		fbHTTP, fbHTTPS, fbAll = detectFallbackProxy()
 	}
 	proxySetup := buildProxyShellExports(callerProxy, fbHTTP, fbHTTPS, fbAll)
-	return fmt.Sprintf("export TERM=xterm-256color; %s; %s; exec /bin/zsh -l", proxySetup, strings.Join(parts, " "))
+	return fmt.Sprintf(
+		`export TERM=xterm-256color; %s; %s; __rc=$?; if [[ $__rc -ne 0 && $__rc -ne 130 ]]; then echo ""; echo "[agy 异常退出 (code=$__rc)，可查看上方报错后输入 exit 关闭]"; exec /bin/zsh -l; fi`,
+		proxySetup, strings.Join(parts, " "),
+	)
 }
 
 func runAgyInPlace(agyBin, cwd string, extraArgs []string) error {

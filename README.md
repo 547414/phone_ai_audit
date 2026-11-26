@@ -294,6 +294,9 @@ ai-audit agy login work             # 清空槽位、弹出新终端登录第二
 ai-audit agy work                   # 一键切换全局账号并弹出新的 tmux 终端运行 agy
 ai-audit agy ttl work 7d            # 自定义登录到期 / 续登提醒周期（支持 7d/14d/30d/auto/off）
 
+# 清理后台无窗口挂载的闲置 tmux 会话（加 --all 可一并清理后台挂起的 AI 会话）
+ai-audit clean
+
 # 切换四种审批模式：
 #   auto   = 智能离座（人在电脑前走本地弹窗，离座 60s 或锁屏自动转交手机）
 #   both   = 双端同步（Mac 右上角悬浮窗与手机通知栏同时弹出，先点为准、另一端秒消失）

@@ -5,6 +5,12 @@
 #   ai-tmux claude [args...] -> run claude inside project tmux session
 #   ai-tmux codex  [args...] -> run codex inside project tmux session
 #   ai-tmux agy    [args...] -> run agy inside project tmux session
+#
+# Lifecycle behavior:
+#   - Normal exit of claude/codex/agy (exit code 0 or 130) automatically destroys the tmux session.
+#   - Non-zero crash keeps a fallback shell open so you can read the error message.
+#   - Closing the Mac terminal window (HUP/TERM) automatically destroys the tmux session if no other
+#     client (such as the phone app) is currently attached. Deliberate Ctrl+B d detach keeps it running.
 set -eu
 
 TMUX_BIN="$(command -v tmux || echo /opt/homebrew/bin/tmux)"
@@ -17,6 +23,33 @@ sanitize() {
   printf '%s' "$1" | tr -cs '[:alnum:]_-' '_' | sed 's/^_*//;s/_*$//'
 }
 
+cleanup_if_unattached() {
+  local target="$1"
+  nohup /bin/zsh -c '
+    TMUX_BIN="$1"; SESS="$2"
+    sleep 0.25
+    att="$("$TMUX_BIN" display-message -p -t "$SESS" "#{session_attached}" 2>/dev/null || echo "")"
+    if [[ "$att" == "0" ]]; then
+      for pid in $("$TMUX_BIN" list-panes -t "$SESS" -F "#{pane_pid}" 2>/dev/null); do
+        /usr/bin/pkill -TERM -P "$pid" 2>/dev/null || true
+      done
+      sleep 0.15
+      for pid in $("$TMUX_BIN" list-panes -t "$SESS" -F "#{pane_pid}" 2>/dev/null); do
+        /usr/bin/pkill -KILL -P "$pid" 2>/dev/null || true
+      done
+      "$TMUX_BIN" kill-session -t "$SESS" 2>/dev/null || true
+    fi
+  ' _ "$TMUX_BIN" "$target" >/dev/null 2>&1 &
+}
+
+run_tmux_attached() {
+  local target="$1"
+  shift
+  trap 'cleanup_if_unattached "$target"; exit 1' HUP TERM
+  "$TMUX_BIN" "$@" || true
+  trap - HUP TERM
+}
+
 dir_name="$(sanitize "$(basename "$PWD")")"
 [[ -z "$dir_name" ]] && dir_name="home"
 
@@ -25,7 +58,8 @@ if [[ $# -eq 0 ]]; then
   if [[ -n "${TMUX:-}" ]]; then
     exec zsh -l
   fi
-  exec "$TMUX_BIN" new-session -A -s "$sess" -c "$PWD"
+  run_tmux_attached "$sess" new-session -A -s "$sess" -c "$PWD"
+  exit 0
 fi
 
 tool="$1"
@@ -39,7 +73,8 @@ if [[ -n "${TMUX:-}" ]]; then
 fi
 
 if "$TMUX_BIN" has-session -t "$sess" 2>/dev/null; then
-  exec "$TMUX_BIN" attach-session -t "$sess"
+  run_tmux_attached "$sess" attach-session -t "$sess"
+  exit 0
 fi
 
 proxy_exports=""
@@ -51,4 +86,5 @@ for var in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_
 done
 
 cmd_str="$(printf '%q ' "$tool" "$@")"
-exec "$TMUX_BIN" new-session -s "$sess" -c "$PWD" -- /bin/zsh -lc "export TERM=xterm-256color; [[ -f \"\$HOME/.zshrc\" ]] && source \"\$HOME/.zshrc\" >/dev/null 2>&1 || true; ${proxy_exports}${cmd_str}; exec /bin/zsh -l"
+tool_q="$(printf '%q' "$tool")"
+run_tmux_attached "$sess" new-session -s "$sess" -c "$PWD" -- /bin/zsh -lc "export TERM=xterm-256color; [[ -f \"\$HOME/.zshrc\" ]] && source \"\$HOME/.zshrc\" >/dev/null 2>&1 || true; ${proxy_exports}${cmd_str}; __rc=\$?; if [[ \$__rc -ne 0 && \$__rc -ne 130 ]]; then echo \"\"; echo \"[${tool_q} 异常退出 (code=\$__rc)，可查看上方报错后输入 exit 关闭]\"; exec /bin/zsh -l; fi"

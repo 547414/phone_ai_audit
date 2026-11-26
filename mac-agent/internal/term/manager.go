@@ -779,25 +779,54 @@ func notifyMacTerminalAttached(label string) {
 
 // OpenMacTerminalWindow opens a real graphical Terminal.app window attached to the given tmux session.
 // Uses LaunchServices `open -a Terminal <.command>` to avoid macOS AppleScript Automation permission prompts,
+// destroys the tmux session on Mac window close (HUP/TERM) when no other client (e.g. phone) is attached,
 // and self-closes its Terminal.app window cleanly once the tmux session exits.
 func OpenMacTerminalWindow(tmuxBin, sessName string) error {
 	sock := findTmuxSocket()
-	attachCmd := fmt.Sprintf("%q attach-session -t %q", tmuxBin, sessName)
+	tmuxCmd := fmt.Sprintf("%q", tmuxBin)
 	if sock != "" {
-		attachCmd = fmt.Sprintf("%q -S %q attach-session -t %q", tmuxBin, sock, sessName)
+		tmuxCmd = fmt.Sprintf("%q -S %q", tmuxBin, sock)
 	}
+	attachCmd := fmt.Sprintf("%s attach-session -t %q", tmuxCmd, sessName)
 
 	scriptPath := filepath.Join(os.TempDir(), fmt.Sprintf("ai-audit-open-%s.command", sessName))
 	content := fmt.Sprintf(`#!/bin/zsh
 export TERM=xterm-256color
 CUR_TTY="$(tty 2>/dev/null || true)"
 rm -f %q
+
+cleanup_if_unattached() {
+  nohup /bin/zsh -c '
+    TMUX_BIN="$1"; SOCK="$2"; SESS="$3"
+    sleep 0.25
+    if [[ -n "$SOCK" ]]; then
+      TCMD=("$TMUX_BIN" -S "$SOCK")
+    else
+      TCMD=("$TMUX_BIN")
+    fi
+    att="$("${TCMD[@]}" display-message -p -t "$SESS" "#{session_attached}" 2>/dev/null || echo "")"
+    if [[ "$att" == "0" ]]; then
+      for pid in $("${TCMD[@]}" list-panes -t "$SESS" -F "#{pane_pid}" 2>/dev/null); do
+        /usr/bin/pkill -TERM -P "$pid" 2>/dev/null || true
+      done
+      sleep 0.15
+      for pid in $("${TCMD[@]}" list-panes -t "$SESS" -F "#{pane_pid}" 2>/dev/null); do
+        /usr/bin/pkill -KILL -P "$pid" 2>/dev/null || true
+      done
+      "${TCMD[@]}" kill-session -t "$SESS" 2>/dev/null || true
+    fi
+  ' _ %q %q %q >/dev/null 2>&1 &
+}
+
+trap 'cleanup_if_unattached; exit 1' HUP TERM
 %s
+trap - HUP TERM
+
 if [[ -n "$CUR_TTY" ]]; then
   (/usr/bin/osascript -e 'tell application "Terminal" to close (every window whose tty of selected tab is "'"$CUR_TTY"'") saving no' >/dev/null 2>&1 &)
 fi
 exit 0
-`, scriptPath, attachCmd)
+`, scriptPath, tmuxBin, sock, sessName, attachCmd)
 	if err := os.WriteFile(scriptPath, []byte(content), 0o700); err != nil {
 		return fmt.Errorf("write open command script: %w", err)
 	}

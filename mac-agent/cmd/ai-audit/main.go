@@ -40,6 +40,9 @@ func main() {
 	case "agy":
 		cmdAgy(os.Args[2:])
 		return
+	case "clean":
+		cmdClean(os.Args[2:])
+		return
 	case "completion":
 		cmdCompletion(os.Args[2:])
 		return
@@ -127,6 +130,7 @@ func printHelp() {
   ai-audit usage                          查看 Claude / Codex / Antigravity 用量与配额重置时间
   ai-audit web                            在浏览器打开本机 Agent 用量看板网页
   ai-audit agy [ls|save|login|switch|open|ttl|rm]  管理多 Antigravity 账号并一键切换/新开终端
+  ai-audit clean [--all] [--dry-run]      清理后台无窗口挂载的闲置 tmux 会话
   ai-audit mode auto|both|phone|notify    切换审批模式 (智能离座 / 双端同步 / 始终手机 / 仅通知)
   ai-audit timeout <秒>                   设置审批弹窗超时时长 (5-600秒，默认 30 秒，Mac/手机同步生效)
   ai-audit auto-approve on|off            开启/关闭超时自动确认授权 (默认开启)
@@ -456,4 +460,71 @@ func cmdTestApproval(cfg config.Config) {
 	defer resp.Body.Close()
 	resBytes, _ := io.ReadAll(resp.Body)
 	fmt.Println("收到审批结果:", strings.TrimSpace(string(resBytes)))
+}
+
+func cmdClean(args []string) {
+	allDetached := false
+	dryRun := false
+	for _, a := range args {
+		switch a {
+		case "--all", "-a":
+			allDetached = true
+		case "--dry-run", "-n":
+			dryRun = true
+		case "-h", "--help", "help":
+			printSubcommandHelp("clean")
+			return
+		}
+	}
+
+	sessions := term.ListTmuxSessions()
+	if len(sessions) == 0 {
+		fmt.Println("当前没有运行中的 tmux 会话。")
+		return
+	}
+
+	isIdleShell := func(cmd string) bool {
+		switch strings.ToLower(strings.TrimSpace(cmd)) {
+		case "zsh", "bash", "sh", "fish", "-zsh", "-bash":
+			return true
+		}
+		return false
+	}
+
+	var targets []proto.TmuxSession
+	for _, s := range sessions {
+		if s.Attached {
+			continue
+		}
+		if allDetached || isIdleShell(s.Command) {
+			targets = append(targets, s)
+		}
+	}
+
+	if len(targets) == 0 {
+		if allDetached {
+			fmt.Println("没有可清理的后台脱离（detached）会话。")
+		} else {
+			fmt.Println("没有可清理的闲置空 shell 会话（如需一并清理后台挂起的 AI 会话，可加 --all）。")
+		}
+		return
+	}
+
+	mgr := term.NewManager(nil, nil)
+	cleaned := 0
+	for _, s := range targets {
+		if dryRun {
+			fmt.Printf("[预览] 将清理会话: %-24s (cmd=%s, cwd=%s)\n", s.Name, s.Command, s.Cwd)
+			continue
+		}
+		if err := mgr.KillSession(s.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "清理 %s 失败: %v\n", s.Name, err)
+			continue
+		}
+		cleaned++
+		fmt.Printf("✓ 已清理后台会话: %s (cmd=%s)\n", s.Name, s.Command)
+	}
+	if !dryRun {
+		fmt.Printf("共清理 %d 个后台遗留 tmux 会话。\n", cleaned)
+	}
 }

@@ -21,6 +21,13 @@ func printSubcommandHelp(sub string) {
 		printHelp()
 	case "agy":
 		printAgyHelp()
+	case "clean":
+		fmt.Println(`用法: ai-audit clean [--all] [--dry-run]
+
+清理后台没有窗口挂载（detached）的遗留 tmux 会话：
+  ai-audit clean            仅清理已退出 AI、只剩空 shell（zsh/bash）的闲置后台会话（安全）
+  ai-audit clean --all      一并清理所有后台无窗口挂载的会话（含后台挂起的 agy/claude/codex）
+  ai-audit clean --dry-run  仅预览将被清理的会话，不实际销毁`)
 	case "status":
 		fmt.Println(`用法: ai-audit status
 
@@ -244,6 +251,7 @@ _ai_audit() {
     'usage:查看 Claude / Codex / Antigravity 用量与配额重置时间'
     'web:在浏览器打开本机 Agent 用量看板网页'
     'agy:管理多 Antigravity 账号并一键切换/新开终端'
+    'clean:清理后台无窗口挂载的闲置 tmux 会话'
     'mode:切换审批模式 (auto / both / phone / notify)'
     'timeout:设置审批弹窗超时时长 (5-600 秒)'
     'auto-approve:开启/关闭超时自动确认授权 (on / off)'
@@ -313,6 +321,14 @@ _ai_audit() {
         )
         _describe -t shells '补全操作' shells
       fi
+      ;;
+    clean)
+      local -a clean_flags
+      clean_flags=(
+        '--all:一并清理所有后台无窗口挂载的会话（含挂起的 AI 会话）'
+        '--dry-run:仅预览待清理会话，不实际销毁'
+      )
+      _describe -t flags 'clean 选项' clean_flags
       ;;
     agy)
       local -a agy_cmds
@@ -443,7 +459,7 @@ _ai_audit_bash() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local top_cmds="help status usage web agy mode timeout auto-approve awake terminal files pair test-msg test-approve completion"
+  local top_cmds="help status usage web agy clean mode timeout auto-approve awake terminal files pair test-msg test-approve completion"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "${top_cmds}" -- "${cur}") )
     return 0
@@ -465,6 +481,9 @@ _ai_audit_bash() {
       ;;
     completion)
       COMPREPLY=( $(compgen -W "install zsh bash" -- "${cur}") )
+      ;;
+    clean)
+      COMPREPLY=( $(compgen -W "--all --dry-run" -- "${cur}") )
       ;;
     agy)
       local profiles
