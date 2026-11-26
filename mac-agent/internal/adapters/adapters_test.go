@@ -43,11 +43,25 @@ func TestCodexPermissionNoInterrupt(t *testing.T) {
 }
 
 func TestAgyPreToolUseFilteringAndDecisions(t *testing.T) {
-	// Sandboxed run_command -> no approval needed, immediate allow
-	safe := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"run_command","args":{"CommandLine":"ls -la","BypassSandbox":false}}}`
+	// Sandboxed run_command (read-only / type-check) -> no approval needed, immediate allow
+	safe := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"run_command","args":{"CommandLine":"ls -la && git status && npx vue-tsc --noEmit","BypassSandbox":false}}}`
 	evSafe := Parse("agy", "PreToolUse", safe)
 	if evSafe.Kind != ActionNone || !strings.Contains(evSafe.DefaultOut, `"allow"`) {
 		t.Fatalf("expected ActionNone for sandboxed command, got %+v", evSafe)
+	}
+
+	// Sandboxed run_command containing git commit / git push -> MUST trigger approval even when BypassSandbox is false
+	gitPushCmd := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"run_command","args":{"CommandLine":"cd /tmp/demo/web && npx vue-tsc --noEmit && cd /tmp/demo && git add a.ts && git commit -m \"feat: test\" && git push","BypassSandbox":false}}}`
+	evGitPush := Parse("agy", "PreToolUse", gitPushCmd)
+	if evGitPush.Kind != ActionApproval {
+		t.Fatalf("expected ActionApproval for sandboxed git commit && git push, got %+v", evGitPush)
+	}
+
+	// Sandboxed high-risk command (rm -rf) -> MUST trigger high-risk approval even when BypassSandbox is false
+	rmRfCmd := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"run_command","args":{"CommandLine":"rm -rf build/","BypassSandbox":false}}}`
+	evRmRf := Parse("agy", "PreToolUse", rmRfCmd)
+	if evRmRf.Kind != ActionApproval || evRmRf.Approval.RiskLevel != "high" {
+		t.Fatalf("expected high-risk approval for rm -rf even without BypassSandbox, got %+v", evRmRf)
 	}
 
 	// BypassSandbox run_command -> high-risk approval

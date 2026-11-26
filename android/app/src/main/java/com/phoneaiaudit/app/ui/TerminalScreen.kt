@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ScreenRotation
@@ -77,7 +79,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -113,6 +118,7 @@ fun TerminalScreen(
     var fontSize by remember { mutableIntStateOf(AuditRepository.config.terminalFontSize) }
     var isLandscape by remember { mutableStateOf(false) }
     var isWideMode by remember { mutableStateOf(true) }
+    var showFullKeyboard by remember { mutableStateOf(false) }
     var composeInput by remember { mutableStateOf("") }
     var termCols by remember { mutableIntStateOf(135) }
     var termRows by remember { mutableIntStateOf(35) }
@@ -201,6 +207,7 @@ fun TerminalScreen(
         activeRequest = null
         isLandscape = false
         isWideMode = true
+        showFullKeyboard = false
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         scope.launch { AuditRepository.refreshTmuxSessions() }
     }
@@ -387,14 +394,33 @@ fun TerminalScreen(
     }
 
     // Active full-screen interactive terminal view
-    BackHandler { exitTerminalView() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    BackHandler {
+        if (showFullKeyboard) {
+            showFullKeyboard = false
+        } else {
+            exitTerminalView()
+        }
+    }
 
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
     LaunchedEffect(imeBottom > 0) {
         if (imeBottom > 0) {
+            showFullKeyboard = false
             delay(140)
             webViewRef.get()?.evaluateJavascript("window.scrollToCursor();", null)
             delay(200)
+            webViewRef.get()?.evaluateJavascript("window.scrollToCursor();", null)
+        }
+    }
+
+    LaunchedEffect(showFullKeyboard) {
+        if (showFullKeyboard) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            delay(120)
             webViewRef.get()?.evaluateJavascript("window.scrollToCursor();", null)
         }
     }
@@ -554,22 +580,43 @@ fun TerminalScreen(
             FloatingGamepadOverlay(
                 containerWidthPx = containerW,
                 containerHeightPx = containerH,
+                fullKeyboardOpen = showFullKeyboard,
+                onToggleFullKeyboard = { showFullKeyboard = !showFullKeyboard },
                 onSendKey = { seq -> socketManager.sendInput(seq) }
             )
         }
 
         HorizontalDivider(thickness = 0.5.dp, color = p.separator.copy(alpha = 0.7f))
 
-        // Clean Chinese IME prompt bar (sticks cleanly above nav bar & keyboard)
+        // Clean Chinese IME prompt bar + Full Terminal Keyboard toggle button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(barBg)
-                .navigationBarsPadding()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .then(if (!showFullKeyboard) Modifier.navigationBarsPadding() else Modifier)
+                .padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
+            Surface(
+                onClick = { showFullKeyboard = !showFullKeyboard },
+                shape = RoundedCornerShape(11.dp),
+                color = if (showFullKeyboard) p.accent else chipBg,
+                border = BorderStroke(
+                    0.8.dp,
+                    if (showFullKeyboard) p.accent else p.separator.copy(alpha = 0.7f)
+                ),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (showFullKeyboard) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+                        contentDescription = if (showFullKeyboard) "收起完整全键盘" else "展开完整全键盘",
+                        tint = if (showFullKeyboard) Color.White else p.accent,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
             OutlinedTextField(
                 value = composeInput,
                 onValueChange = { composeInput = it },
@@ -588,6 +635,7 @@ fun TerminalScreen(
                     .weight(1f)
                     .onFocusChanged { state ->
                         if (state.isFocused) {
+                            showFullKeyboard = false
                             scope.launch {
                                 webViewRef.get()?.evaluateJavascript("window.scrollToCursor();", null)
                                 delay(220)
@@ -615,25 +663,48 @@ fun TerminalScreen(
                 modifier = Modifier.width(50.dp)
             )
         }
+
+        if (showFullKeyboard) {
+            HorizontalDivider(thickness = 0.5.dp, color = p.separator.copy(alpha = 0.7f))
+            FullTerminalKeyboard(
+                compact = isLandscape,
+                onSendKey = { seq ->
+                    socketManager.sendInput(seq)
+                },
+                onClose = { showFullKeyboard = false }
+            )
+        }
     }
 }
 
+private data class GamepadShortcut(
+    val label: String,
+    val seq: String,
+    val tone: String = "normal" // "normal", "accent", "red", "orange", "green", "muted"
+)
+
 /**
- * Draggable game-pad style floating overlay for directional keys & terminal shortcuts.
+ * Draggable game-pad style floating overlay for directional keys & multi-page terminal/Agent shortcuts.
  * Both collapsed orb and expanded panel are smoothly draggable and persist their last position.
  */
 @Composable
 private fun FloatingGamepadOverlay(
     containerWidthPx: Float,
     containerHeightPx: Float,
+    fullKeyboardOpen: Boolean,
+    onToggleFullKeyboard: () -> Unit,
     onSendKey: (String) -> Unit
 ) {
     val p = LocalIosPalette.current
     val density = LocalDensity.current
     var expanded by remember { mutableStateOf(false) }
+    var activePage by remember { mutableIntStateOf(0) } // 0=常用, 1=Agent, 2=导航
 
-    val panelW = with(density) { (if (expanded) 258.dp else 46.dp).toPx() }
-    val panelH = with(density) { (if (expanded) 160.dp else 46.dp).toPx() }
+    val maxAvailWidthDp = with(density) { (containerWidthPx / density.density - 16f).coerceAtLeast(280f) }
+    val expandedWidthDp = maxAvailWidthDp.coerceAtMost(344f).dp
+
+    val panelW = with(density) { (if (expanded) expandedWidthDp else 48.dp).toPx() }
+    val panelH = with(density) { (if (expanded) 226.dp else 48.dp).toPx() }
     val padPx = with(density) { 8.dp.toPx() }
 
     val minX = padPx
@@ -667,6 +738,45 @@ private fun FloatingGamepadOverlay(
     val keyBg = if (p.isDark) Color(0xFF2C2C2E) else Color(0xFFE9E9EE)
     val borderCol = p.separator.copy(alpha = 0.85f)
 
+    val pageTabs = listOf("常用", "Agent", "导航")
+    val pageKeys = remember {
+        listOf(
+            // Page 0: 常用（含 Shift+Tab 与高频中断/确认）
+            listOf(
+                GamepadShortcut("Esc", "\u001B"),
+                GamepadShortcut("Tab", "\t"),
+                GamepadShortcut("Shift+Tab", "\u001B[Z"),
+                GamepadShortcut("Ctrl+C", "\u0003", "red"),
+                GamepadShortcut("Ctrl+D", "\u0004", "orange"),
+                GamepadShortcut("y 确认", "y\r", "green"),
+                GamepadShortcut("n 取消", "n\r"),
+                GamepadShortcut("/", "/")
+            ),
+            // Page 1: Agent 专属高频快捷键（Claude Code / Codex / Antigravity）
+            listOf(
+                GamepadShortcut("Shift+Tab", "\u001B[Z"),
+                GamepadShortcut("Ctrl+O 展开", "\u000F"),
+                GamepadShortcut("Ctrl+G 编辑", "\u0007"),
+                GamepadShortcut("Ctrl+T 任务", "\u0014"),
+                GamepadShortcut("Ctrl+R 历史", "\u0012"),
+                GamepadShortcut("Ctrl+B 后台", "\u0002"),
+                GamepadShortcut("Ctrl+U 清行", "\u0015", "orange"),
+                GamepadShortcut("Alt+⏎ 换行", "\u001B\r", "green")
+            ),
+            // Page 2: 导航与数字选单
+            listOf(
+                GamepadShortcut("1", "1"),
+                GamepadShortcut("2", "2"),
+                GamepadShortcut("3", "3"),
+                GamepadShortcut("⌫ 退格", "\u007F", "orange"),
+                GamepadShortcut("PgUp", "\u001B[5~"),
+                GamepadShortcut("PgDn", "\u001B[6~"),
+                GamepadShortcut("Ctrl+L 清屏", "\u000C"),
+                GamepadShortcut("q 退翻页", "q", "muted")
+            )
+        )
+    }
+
     Box(
         modifier = Modifier.offset { IntOffset(posX.roundToInt(), posY.roundToInt()) }
     ) {
@@ -674,7 +784,7 @@ private fun FloatingGamepadOverlay(
             // Single unified gesture detector: tap (< slop) expands, drag (>= slop) moves & saves!
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(48.dp)
                     .shadow(6.dp, CircleShape)
                     .clip(CircleShape)
                     .background(glassBg)
@@ -722,19 +832,19 @@ private fun FloatingGamepadOverlay(
                             Icons.Default.SportsEsports,
                             contentDescription = "展开或拖动方向键悬浮球",
                             tint = p.accent,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(23.dp)
                         )
                     }
                 }
             }
         } else {
             Surface(
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = glassBg,
                 border = BorderStroke(0.8.dp, borderCol),
                 modifier = Modifier
-                    .width(258.dp)
-                    .shadow(10.dp, RoundedCornerShape(18.dp))
+                    .width(expandedWidthDp)
+                    .shadow(10.dp, RoundedCornerShape(20.dp))
                     .pointerInput(containerWidthPx, containerHeightPx) {
                         detectDragGestures(
                             onDragEnd = { persistPos() },
@@ -745,26 +855,72 @@ private fun FloatingGamepadOverlay(
                         }
                     }
             ) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Drag header + collapse button
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    // Drag header + larger shortcut page switcher + full keyboard shortcut + collapse button
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.SportsEsports, null, tint = p.accent, modifier = Modifier.size(14.dp))
-                            Text("方向与快捷键 · 按住拖动", color = p.secondaryLabel, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(22.dp)
-                                .clip(CircleShape)
-                                .background(keyBg)
-                                .clickable { expanded = false },
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.Close, "收起", tint = p.secondaryLabel, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Default.SportsEsports, null, tint = p.accent, modifier = Modifier.size(17.dp))
+                            pageTabs.forEachIndexed { idx, tabTitle ->
+                                val selected = activePage == idx
+                                Surface(
+                                    onClick = { activePage = idx },
+                                    shape = RoundedCornerShape(9.dp),
+                                    color = if (selected) p.accent else keyBg,
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 11.dp)
+                                    ) {
+                                        Text(
+                                            text = tabTitle,
+                                            color = if (selected) Color.White else p.secondaryLabel,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(if (fullKeyboardOpen) p.accent else keyBg)
+                                    .clickable {
+                                        if (!fullKeyboardOpen) expanded = false
+                                        onToggleFullKeyboard()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Keyboard,
+                                    "完整全键盘",
+                                    tint = if (fullKeyboardOpen) Color.White else p.accent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(keyBg)
+                                    .clickable { expanded = false },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Close, "收起", tint = p.secondaryLabel, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
 
@@ -773,45 +929,447 @@ private fun FloatingGamepadOverlay(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Left: Classic Gaming D-Pad with center Enter
+                        // Left: Thumb-friendly D-Pad with center Enter
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            PadKey("↑", keyBg, p.label, 34.dp, 32.dp) { onSendKey("\u001B[A") }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                PadKey("←", keyBg, p.label, 34.dp, 32.dp) { onSendKey("\u001B[D") }
-                                PadKey("⏎", p.accent, Color.White, 34.dp, 32.dp, circle = true) { onSendKey("\r") }
-                                PadKey("→", keyBg, p.label, 34.dp, 32.dp) { onSendKey("\u001B[C") }
+                            PadKey("↑", keyBg, p.label, 44.dp, 42.dp) { onSendKey("\u001B[A") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                PadKey("←", keyBg, p.label, 44.dp, 42.dp) { onSendKey("\u001B[D") }
+                                PadKey("⏎", p.accent, Color.White, 44.dp, 42.dp, circle = true) { onSendKey("\r") }
+                                PadKey("→", keyBg, p.label, 44.dp, 42.dp) { onSendKey("\u001B[C") }
                             }
-                            PadKey("↓", keyBg, p.label, 34.dp, 32.dp) { onSendKey("\u001B[B") }
+                            PadKey("↓", keyBg, p.label, 44.dp, 42.dp) { onSendKey("\u001B[B") }
                         }
 
-                        // Right: 2-column compact terminal shortcuts
+                        // Right: 2-column x 4-row thumb-friendly shortcut grid for selected page
+                        val currentKeys = pageKeys[activePage]
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                MiniActionKey("Esc", keyBg, p.label, Modifier.weight(1f)) { onSendKey("\u001B") }
-                                MiniActionKey("Tab", keyBg, p.label, Modifier.weight(1f)) { onSendKey("\t") }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                MiniActionKey("^C", p.red.copy(alpha = 0.2f), p.red, Modifier.weight(1f)) { onSendKey("\u0003") }
-                                MiniActionKey("^D", p.orange.copy(alpha = 0.2f), p.orange, Modifier.weight(1f)) { onSendKey("\u0004") }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                MiniActionKey("y", p.green.copy(alpha = 0.2f), p.green, Modifier.weight(1f)) { onSendKey("y\r") }
-                                MiniActionKey("n", keyBg, p.label, Modifier.weight(1f)) { onSendKey("n\r") }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                MiniActionKey("/", keyBg, p.label, Modifier.weight(1f)) { onSendKey("/") }
-                                MiniActionKey("q 退翻页", keyBg, p.secondaryLabel, Modifier.weight(1f)) { onSendKey("q") }
+                            for (rowIdx in 0 until 4) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    for (colIdx in 0 until 2) {
+                                        val item = currentKeys[rowIdx * 2 + colIdx]
+                                        val (bg, fg) = when (item.tone) {
+                                            "red" -> p.red.copy(alpha = 0.22f) to p.red
+                                            "orange" -> p.orange.copy(alpha = 0.22f) to p.orange
+                                            "green" -> p.green.copy(alpha = 0.22f) to p.green
+                                            "muted" -> keyBg to p.secondaryLabel
+                                            else -> keyBg to p.label
+                                        }
+                                        MiniActionKey(item.label, bg, fg, Modifier.weight(1f)) {
+                                            onSendKey(item.seq)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Full virtual terminal keyboard with sticky Ctrl / Alt / Shift modifiers,
+ * Fn (F1–F12, Home/End/PgUp/PgDn/Del), Symbol layer, full QWERTY + digits, and arrow keys.
+ */
+@Composable
+private fun FullTerminalKeyboard(
+    compact: Boolean,
+    onSendKey: (String) -> Unit,
+    onClose: () -> Unit
+) {
+    val p = LocalIosPalette.current
+    // Modifier states: 0 = off, 1 = one-shot sticky, 2 = locked
+    var ctrlState by remember { mutableIntStateOf(0) }
+    var altState by remember { mutableIntStateOf(0) }
+    var shiftState by remember { mutableIntStateOf(0) }
+    var fnMode by remember { mutableStateOf(false) }
+    var symMode by remember { mutableStateOf(false) }
+
+    val kbBg = if (p.isDark) Color(0xFF141416) else Color(0xFFD5D7DD)
+    val keyNormalBg = if (p.isDark) Color(0xFF2C2C2E) else Color(0xFFFFFFFF)
+    val keyFuncBg = if (p.isDark) Color(0xFF202024) else Color(0xFFE4E6EC)
+    val keyActiveBg = p.accent
+    val keyLockBg = p.orange
+
+    val keyH = if (compact) 31.dp else 42.dp
+    val digitKeyH = if (compact) 29.dp else 38.dp
+    val topKeyH = if (compact) 29.dp else 36.dp
+    val rowGap = if (compact) 4.dp else 6.dp
+    val keyGap = if (compact) 4.dp else 4.5.dp
+    val topKeyGap = 6.dp
+
+    fun consumeOneShotModifiers() {
+        if (ctrlState == 1) ctrlState = 0
+        if (altState == 1) altState = 0
+        if (shiftState == 1) shiftState = 0
+    }
+
+    fun sendCharKey(baseChar: String, shiftedChar: String = baseChar.uppercase()) {
+        val useShift = shiftState > 0
+        val ch = if (useShift) shiftedChar else baseChar
+        var seq = ch
+        if (ctrlState > 0 && ch.length == 1) {
+            val c = ch[0].lowercaseChar()
+            seq = when {
+                c in 'a'..'z' -> (c.code - 'a'.code + 1).toChar().toString()
+                c == '[' -> "\u001B"
+                c == '\\' -> "\u001C"
+                c == ']' -> "\u001D"
+                c == '^' || c == '6' -> "\u001E"
+                c == '_' || c == '-' -> "\u001F"
+                c == ' ' || c == '2' -> "\u0000"
+                else -> ch
+            }
+        }
+        if (altState > 0) {
+            seq = "\u001B$seq"
+        }
+        onSendKey(seq)
+        consumeOneShotModifiers()
+    }
+
+    fun sendArrow(codeChar: Char) {
+        val seq = when {
+            ctrlState > 0 && altState > 0 -> "\u001B[1;7$codeChar"
+            ctrlState > 0 -> "\u001B[1;5$codeChar"
+            altState > 0 -> "\u001B[1;3$codeChar"
+            shiftState > 0 -> "\u001B[1;2$codeChar"
+            else -> "\u001B[$codeChar"
+        }
+        onSendKey(seq)
+        consumeOneShotModifiers()
+    }
+
+    fun sendSpecial(seq: String) {
+        val out = if (altState > 0 && !seq.startsWith("\u001B")) "\u001B$seq" else seq
+        onSendKey(out)
+        consumeOneShotModifiers()
+    }
+
+    fun cycleSticky(cur: Int): Int = when (cur) {
+        0 -> 1
+        1 -> 2
+        else -> 0
+    }
+
+    val statusHint = buildString {
+        if (ctrlState == 2) append("Ctrl锁定 ") else if (ctrlState == 1) append("Ctrl+ ")
+        if (altState == 2) append("Alt锁定 ") else if (altState == 1) append("Alt+ ")
+        if (shiftState == 2) append("大写锁定 ") else if (shiftState == 1) append("Shift+ ")
+        if (fnMode) append("Fn层 ")
+        if (symMode) append("符号层 ")
+    }.trim()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(kbBg)
+            .navigationBarsPadding()
+            .padding(
+                start = 8.dp,
+                end = 8.dp,
+                top = 8.dp,
+                bottom = if (compact) 10.dp else 28.dp
+            ),
+        verticalArrangement = Arrangement.spacedBy(rowGap)
+    ) {
+        // Row 1 (6 spacious keys): Core control & sticky modifier keys (including Shift)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(topKeyGap)
+        ) {
+            FullKbKey("Esc", keyFuncBg, p.label, Modifier.weight(1f), topKeyH, 13.sp) {
+                sendSpecial("\u001B")
+            }
+            FullKbKey("Tab", keyFuncBg, p.label, Modifier.weight(1f), topKeyH, 13.sp) {
+                if (shiftState > 0) {
+                    sendSpecial("\u001B[Z")
+                } else {
+                    sendSpecial("\t")
+                }
+            }
+            FullKbKey(
+                label = if (shiftState == 2) "Shift*" else "Shift",
+                bg = when (shiftState) {
+                    2 -> keyLockBg
+                    1 -> keyActiveBg
+                    else -> keyFuncBg
+                },
+                fg = if (shiftState > 0) Color.White else p.label,
+                modifier = Modifier.weight(1.1f),
+                height = topKeyH,
+                fontSize = 13.sp
+            ) { shiftState = cycleSticky(shiftState) }
+            FullKbKey(
+                label = if (ctrlState == 2) "Ctrl*" else "Ctrl",
+                bg = when (ctrlState) {
+                    2 -> keyLockBg
+                    1 -> keyActiveBg
+                    else -> keyFuncBg
+                },
+                fg = if (ctrlState > 0) Color.White else p.label,
+                modifier = Modifier.weight(1f),
+                height = topKeyH,
+                fontSize = 13.sp
+            ) { ctrlState = cycleSticky(ctrlState) }
+            FullKbKey(
+                label = if (altState == 2) "Alt*" else "Alt",
+                bg = when (altState) {
+                    2 -> keyLockBg
+                    1 -> keyActiveBg
+                    else -> keyFuncBg
+                },
+                fg = if (altState > 0) Color.White else p.label,
+                modifier = Modifier.weight(1f),
+                height = topKeyH,
+                fontSize = 13.sp
+            ) { altState = cycleSticky(altState) }
+            FullKbKey(
+                label = "Fn",
+                bg = if (fnMode) keyActiveBg else keyFuncBg,
+                fg = if (fnMode) Color.White else p.label,
+                modifier = Modifier.weight(0.95f),
+                height = topKeyH,
+                fontSize = 13.sp
+            ) {
+                fnMode = !fnMode
+                if (fnMode) symMode = false
+            }
+        }
+
+        // Row 2 (7 spacious keys): One-tap Shift+Tab + large arrow keys + high-freq CLI keys (or Fn Nav keys)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(topKeyGap)
+        ) {
+            if (fnMode) {
+                val fnNavRow = listOf(
+                    "Home" to "\u001B[H",
+                    "End" to "\u001B[F",
+                    "PgUp" to "\u001B[5~",
+                    "PgDn" to "\u001B[6~",
+                    "Del" to "\u001B[3~",
+                    "F11" to "\u001B[23~",
+                    "F12" to "\u001B[24~"
+                )
+                fnNavRow.forEach { (label, seq) ->
+                    FullKbKey(label, keyFuncBg, p.accent, Modifier.weight(1f), topKeyH, 12.sp) {
+                        sendSpecial(seq)
+                    }
+                }
+            } else {
+                FullKbKey("⇧Tab", keyFuncBg, p.label, Modifier.weight(1.3f), topKeyH, 12.sp) {
+                    sendSpecial("\u001B[Z")
+                }
+                FullKbKey("←", keyFuncBg, p.label, Modifier.weight(1f), topKeyH, 16.sp) { sendArrow('D') }
+                FullKbKey("↓", keyFuncBg, p.label, Modifier.weight(1f), topKeyH, 16.sp) { sendArrow('B') }
+                FullKbKey("↑", keyFuncBg, p.label, Modifier.weight(1f), topKeyH, 16.sp) { sendArrow('A') }
+                FullKbKey("→", keyFuncBg, p.label, Modifier.weight(1f), topKeyH, 16.sp) { sendArrow('C') }
+                FullKbKey("/", keyFuncBg, p.label, Modifier.weight(0.95f), topKeyH, 16.sp) { sendCharKey("/", "/") }
+                FullKbKey("-", keyFuncBg, p.label, Modifier.weight(0.95f), topKeyH, 16.sp) { sendCharKey("-", "_") }
+            }
+        }
+
+        // Row 3: Digits / Shifted Symbols / F1-F10
+        val row3Digits = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
+        val row3Shifted = listOf("!", "@", "#", "$", "%", "^", "&", "*", "(", ")")
+        val row3Fn = listOf(
+            "F1" to "\u001BOP",
+            "F2" to "\u001BOQ",
+            "F3" to "\u001BOR",
+            "F4" to "\u001BOS",
+            "F5" to "\u001B[15~",
+            "F6" to "\u001B[17~",
+            "F7" to "\u001B[18~",
+            "F8" to "\u001B[19~",
+            "F9" to "\u001B[20~",
+            "F10" to "\u001B[21~"
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(keyGap)
+        ) {
+            if (fnMode) {
+                row3Fn.forEach { (label, seq) ->
+                    FullKbKey(label, keyNormalBg, p.accent, Modifier.weight(1f), digitKeyH, 12.sp) {
+                        sendSpecial(seq)
+                    }
+                }
+            } else {
+                row3Digits.indices.forEach { i ->
+                    val display = if (shiftState > 0 || symMode) row3Shifted[i] else row3Digits[i]
+                    FullKbKey(display, keyNormalBg, p.label, Modifier.weight(1f), digitKeyH, 16.sp) {
+                        if (symMode) {
+                            sendCharKey(row3Shifted[i], row3Shifted[i])
+                        } else {
+                            sendCharKey(row3Digits[i], row3Shifted[i])
+                        }
+                    }
+                }
+            }
+        }
+
+        // Row 4: QWERTY or Symbols
+        val row4Letters = listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")
+        val row4Symbols = listOf("`", "~", "-", "_", "=", "+", "[", "]", "{", "}")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(keyGap)
+        ) {
+            if (fnMode || symMode) {
+                row4Symbols.forEach { sym ->
+                    FullKbKey(sym, keyNormalBg, p.label, Modifier.weight(1f), keyH, 17.sp) {
+                        sendCharKey(sym, sym)
+                    }
+                }
+            } else {
+                row4Letters.forEach { ch ->
+                    val disp = if (shiftState > 0) ch.uppercase() else ch
+                    FullKbKey(disp, keyNormalBg, p.label, Modifier.weight(1f), keyH, 17.sp) {
+                        sendCharKey(ch)
+                    }
+                }
+            }
+        }
+
+        // Row 5: ASDFGHJKL or Symbols
+        val row5Letters = listOf("a", "s", "d", "f", "g", "h", "j", "k", "l")
+        val row5Symbols = listOf("\\", "|", ";", ":", "'", "\"", "<", ">", "/", "?")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (fnMode || symMode) 0.dp else 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(keyGap)
+        ) {
+            if (fnMode || symMode) {
+                row5Symbols.forEach { sym ->
+                    FullKbKey(sym, keyNormalBg, p.label, Modifier.weight(1f), keyH, 17.sp) {
+                        sendCharKey(sym, sym)
+                    }
+                }
+            } else {
+                row5Letters.forEach { ch ->
+                    val disp = if (shiftState > 0) ch.uppercase() else ch
+                    FullKbKey(disp, keyNormalBg, p.label, Modifier.weight(1f), keyH, 17.sp) {
+                        sendCharKey(ch)
+                    }
+                }
+            }
+        }
+
+        // Row 6: Shift + ZXCVBNM / Extra Symbols + Backspace
+        val row6Letters = listOf("z", "x", "c", "v", "b", "n", "m")
+        val row6Symbols = listOf(",", ".", "!", "?", "@", "#", "$")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(keyGap)
+        ) {
+            FullKbKey(
+                label = if (shiftState == 2) "⇪" else "⇧",
+                bg = when (shiftState) {
+                    2 -> keyLockBg
+                    1 -> keyActiveBg
+                    else -> keyFuncBg
+                },
+                fg = if (shiftState > 0) Color.White else p.label,
+                modifier = Modifier.weight(1.5f),
+                height = keyH,
+                fontSize = 17.sp
+            ) { shiftState = cycleSticky(shiftState) }
+
+            if (fnMode || symMode) {
+                row6Symbols.forEach { sym ->
+                    FullKbKey(sym, keyNormalBg, p.label, Modifier.weight(1f), keyH, 17.sp) {
+                        sendCharKey(sym, sym)
+                    }
+                }
+            } else {
+                row6Letters.forEach { ch ->
+                    val disp = if (shiftState > 0) ch.uppercase() else ch
+                    FullKbKey(disp, keyNormalBg, p.label, Modifier.weight(1f), keyH, 17.sp) {
+                        sendCharKey(ch)
+                    }
+                }
+            }
+
+            FullKbKey("⌫", keyFuncBg, p.red, Modifier.weight(1.5f), keyH, 17.sp) {
+                sendSpecial("\u007F")
+            }
+        }
+
+        // Row 7 (5 spacious bottom keys): Symbol toggle + dot + wide Space + large Enter + Hide
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(topKeyGap)
+        ) {
+            FullKbKey(
+                label = if (symMode) "ABC" else "符号",
+                bg = if (symMode) keyActiveBg else keyFuncBg,
+                fg = if (symMode) Color.White else p.label,
+                modifier = Modifier.weight(1.45f),
+                height = keyH,
+                fontSize = 14.sp
+            ) {
+                symMode = !symMode
+                if (symMode) fnMode = false
+            }
+            FullKbKey(".", keyNormalBg, p.label, Modifier.weight(1.0f), keyH, 18.sp) { sendCharKey(".", ".") }
+            FullKbKey(
+                label = statusHint.ifBlank { "Space" },
+                bg = keyNormalBg,
+                fg = if (statusHint.isNotBlank()) p.accent else p.secondaryLabel,
+                modifier = Modifier.weight(3.6f),
+                height = keyH,
+                fontSize = 13.sp
+            ) { sendCharKey(" ", " ") }
+            FullKbKey(
+                label = if (altState > 0) "Alt+⏎" else "⏎",
+                bg = p.accent,
+                fg = Color.White,
+                modifier = Modifier.weight(1.75f),
+                height = keyH,
+                fontSize = 16.sp
+            ) { sendSpecial("\r") }
+            FullKbKey("收起", keyFuncBg, p.secondaryLabel, Modifier.weight(1.3f), keyH, 13.sp) {
+                onClose()
+            }
+        }
+    }
+}
+
+@Composable
+private fun FullKbKey(
+    label: String,
+    bg: Color,
+    fg: Color,
+    modifier: Modifier,
+    height: androidx.compose.ui.unit.Dp,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = bg,
+        shape = RoundedCornerShape(7.dp),
+        shadowElevation = 0.5.dp,
+        modifier = modifier.height(height)
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Text(
+                text = label,
+                color = fg,
+                fontSize = fontSize,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
         }
     }
 }
@@ -829,11 +1387,11 @@ private fun PadKey(
     Surface(
         onClick = onClick,
         color = bg,
-        shape = if (circle) CircleShape else RoundedCornerShape(8.dp),
+        shape = if (circle) CircleShape else RoundedCornerShape(10.dp),
         modifier = Modifier.size(width = w, height = h)
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = fg, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -843,11 +1401,18 @@ private fun MiniActionKey(label: String, bg: Color, fg: Color, modifier: Modifie
     Surface(
         onClick = onClick,
         color = bg,
-        shape = RoundedCornerShape(7.dp),
-        modifier = modifier.height(26.dp)
+        shape = RoundedCornerShape(9.dp),
+        modifier = modifier.height(36.dp)
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(label, color = fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) {
+            Text(
+                text = label,
+                color = fg,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

@@ -156,7 +156,7 @@ agy_hooks = {
         ],
         "PreToolUse": [
             {
-                "matcher": "ask_question|ask_permission|run_command|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content",
+                "matcher": "ask_question|ask_permission|run_command|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|delete_file|remove_file",
                 "hooks": [
                     {
                         "type": "command",

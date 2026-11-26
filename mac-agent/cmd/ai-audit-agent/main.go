@@ -899,6 +899,8 @@ func (d *Daemon) serveLocalIPC(ctx context.Context) error {
 			return
 		}
 		st := d.getSettings()
+		log.Printf("approval request: agent=%s tool=%s risk=%s mode=%s summary=%q",
+			req.Approval.Agent, req.Approval.ToolName, req.Approval.RiskLevel, st.ApprovalMode, req.Approval.Summary)
 		if st.ApprovalMode == "notify" {
 			d.forwardAttentionFallback(req.Approval, "仅通知模式")
 			writeLocalJSON(w, proto.Approval{Status: "fallback", DecisionReason: "仅通知模式"})

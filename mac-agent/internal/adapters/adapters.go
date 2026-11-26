@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -376,14 +377,16 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 		bypass, _ := args["BypassSandbox"].(bool)
 		cmdLine := strVal(args, "CommandLine")
 		toolSummary := strVal(args, "toolSummary")
-		if bypass {
+		rk := risk.Evaluate(toolName, cmdLine, bypass, false)
+		needApproval, extraReasons := shouldApproveAgyCommand(cmdLine, bypass, rk.Level)
+		if needApproval {
 			summary := toolSummary
 			if summary == "" {
 				summary = oneLine(cmdLine, 140)
 			} else if cmdLine != "" {
 				summary = summary + ": " + oneLine(cmdLine, 120)
 			}
-			rk := risk.Evaluate(toolName, cmdLine, true, false)
+			reasons := mergeUniqueStrings(rk.Reasons, extraReasons)
 			return ParsedEvent{
 				Kind:       ActionApproval,
 				DefaultOut: "{\"decision\":\"allow\"}\n",
@@ -398,7 +401,7 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 					Summary:     summary,
 					PayloadJSON: prettyJSON(args),
 					RiskLevel:   rk.Level,
-					RiskReasons: rk.Reasons,
+					RiskReasons: reasons,
 				},
 			}
 		}
@@ -433,7 +436,7 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 		}
 	}
 
-	if toolName == "write_file" || toolName == "edit_file" || toolName == "write_to_file" || toolName == "replace_file_content" || toolName == "multi_replace_file_content" {
+	if toolName == "write_file" || toolName == "edit_file" || toolName == "write_to_file" || toolName == "replace_file_content" || toolName == "multi_replace_file_content" || toolName == "delete_file" || toolName == "remove_file" {
 		if am, ok := args["ArtifactMetadata"].(map[string]any); ok {
 			if rf, _ := am["RequestFeedback"].(bool); rf {
 				target := strVal(args, "Path")
@@ -495,6 +498,54 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 	}
 
 	return ParsedEvent{Kind: ActionNone, DefaultOut: "{\"decision\":\"allow\"}\n"}
+}
+
+type agyCmdRule struct {
+	re     *regexp.Regexp
+	reason string
+}
+
+var agyApprovalCmdRules = []agyCmdRule{
+	{regexp.MustCompile(`(?i)\bgit\s+(push|commit|rebase|merge|cherry-pick|revert|tag\s+-[df]|branch\s+-D|checkout\s+--|restore)\b`), "涉及 Git 提交/推送或历史变更"},
+	{regexp.MustCompile(`(?i)\b(ssh|scp|rsync|sftp|kubectl|helm|terraform|ansible|systemctl|nginx|certbot|launchctl)\b`), "涉及远程主机或系统服务操作"},
+	{regexp.MustCompile(`(?i)\bdocker\s+(push|rm|rmi|system\s+prune|compose\s+(up|down|restart)|run|exec|stop|kill)\b`), "涉及 Docker 容器或镜像变更"},
+	{regexp.MustCompile(`(?i)\bgh\s+(pr\s+(create|merge|close|edit)|release\s+(create|delete|upload)|issue\s+(create|close)|repo\s+(create|delete))\b`), "涉及 GitHub 远端写入操作"},
+	{regexp.MustCompile(`(?i)\b(npm|pnpm|yarn|cargo|gem|poetry|twine)\s+(publish|upload)\b`), "涉及软件包发布上传"},
+	{regexp.MustCompile(`(?i)\b(curl|wget)\b[^\n]*(\s-(X|d|F)\b|--request\b|--data\b|--upload-file\b)`), "涉及带写入副作用的网络请求"},
+	{regexp.MustCompile(`(?i)\b(killall|pkill|shutdown|reboot|diskutil)\b`), "涉及系统进程终止或磁盘操作"},
+}
+
+// shouldApproveAgyCommand decides whether an Antigravity run_command PreToolUse call
+// should trigger Phone/Mac dual-end approval even when BypassSandbox is false, because
+// AGY's built-in auto/default policy still prompts for git push/commit, high-risk, or
+// external side-effect commands.
+func shouldApproveAgyCommand(cmdLine string, bypass bool, riskLevel string) (bool, []string) {
+	if bypass || riskLevel == "high" {
+		return true, nil
+	}
+	var extra []string
+	for _, r := range agyApprovalCmdRules {
+		if r.re.MatchString(cmdLine) {
+			extra = append(extra, r.reason)
+		}
+	}
+	return len(extra) > 0, extra
+}
+
+func mergeUniqueStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range append(append([]string(nil), a...), b...) {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func extractAgyQuestion(args map[string]any) string {
