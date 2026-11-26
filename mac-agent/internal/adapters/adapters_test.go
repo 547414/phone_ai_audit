@@ -71,6 +71,34 @@ func TestAgyPreToolUseFilteringAndDecisions(t *testing.T) {
 		t.Fatalf("expected high-risk approval for BypassSandbox, got %+v", evRisky)
 	}
 
+	// Sandboxed command touching path outside workspace -> triggers approval
+	outsideCmd := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"run_command","args":{"CommandLine":"tail -n 20 ~/.config/ai-audit/agent.stderr.log","BypassSandbox":false}}}`
+	evOutside := Parse("agy", "PreToolUse", outsideCmd)
+	if evOutside.Kind != ActionApproval {
+		t.Fatalf("expected ActionApproval for command accessing path outside workspace, got %+v", evOutside)
+	}
+
+	// Sensitive read_file (.env) -> triggers approval
+	envRead := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"read_file","args":{"Path":"/tmp/demo/.env"}}}`
+	evEnvRead := Parse("agy", "PreToolUse", envRead)
+	if evEnvRead.Kind != ActionApproval {
+		t.Fatalf("expected ActionApproval for reading .env, got %+v", evEnvRead)
+	}
+
+	// Normal in-workspace read_file -> ActionNone
+	okRead := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"read_file","args":{"Path":"/tmp/demo/main.go"}}}`
+	evOkRead := Parse("agy", "PreToolUse", okRead)
+	if evOkRead.Kind != ActionNone {
+		t.Fatalf("expected ActionNone for normal workspace read_file, got %+v", evOkRead)
+	}
+
+	// External MCP tool -> triggers approval
+	mcpCall := `{"conversationId":"g1","cwd":"/tmp/demo","workspacePaths":["/tmp/demo"],"toolCall":{"name":"mcp_github_create_issue","args":{"title":"bug"}}}`
+	evMCP := Parse("agy", "PreToolUse", mcpCall)
+	if evMCP.Kind != ActionApproval {
+		t.Fatalf("expected ActionApproval for MCP tool, got %+v", evMCP)
+	}
+
 	var allowObj map[string]any
 	_ = json.Unmarshal([]byte(FormatDecisionOutput("agy", proto.Approval{Status: "approved"})), &allowObj)
 	if allowObj["decision"] != "auto_approve" {

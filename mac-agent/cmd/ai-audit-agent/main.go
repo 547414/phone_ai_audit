@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"phone-ai-audit/mac-agent/internal/agywatch"
 	"phone-ai-audit/mac-agent/internal/awake"
 	"phone-ai-audit/mac-agent/internal/config"
 	"phone-ai-audit/mac-agent/internal/fsengine"
@@ -42,12 +44,15 @@ type wsOut struct {
 	data []byte
 }
 
+var errTunnelUnavailable = errors.New("tunnel unavailable")
+
 type Daemon struct {
-	cfg      config.Config
-	awake    *awake.Controller
-	termMgr  *term.Manager
-	fsMgr    *fsengine.Engine
-	usageMgr *usage.Engine
+	cfg        config.Config
+	awake      *awake.Controller
+	termMgr    *term.Manager
+	fsMgr      *fsengine.Engine
+	usageMgr   *usage.Engine
+	agyWatcher *agywatch.Watcher
 
 	mu       sync.Mutex
 	wsConn   *websocket.Conn
@@ -55,9 +60,11 @@ type Daemon struct {
 	wsDone   chan struct{}
 	settings proto.Settings
 
-	ackWaiters      map[string]chan proto.Approval
-	decisionWaiters map[string]chan proto.Approval
-	fsStreams       map[string]context.CancelFunc
+	ackWaiters          map[string]chan proto.Approval
+	decisionWaiters     map[string]chan proto.Approval
+	fsStreams           map[string]context.CancelFunc
+	activeHookSessions  map[string]int
+	recentHookFallbacks map[string]time.Time
 }
 
 func newDaemon(cfg config.Config) *Daemon {
@@ -73,17 +80,48 @@ func newDaemon(cfg config.Config) *Daemon {
 		settings: proto.Settings{
 			ApprovalMode:       "auto",
 			IdleThresholdSec:   60,
-			DefaultTimeoutSec:  180,
-			TimeoutAction:      "fallback",
+			DefaultTimeoutSec:  30,
+			TimeoutAction:      "approve",
 			TerminalEnabled:    true,
 			FilesEnabled:       true,
 			MacAwakeEnabled:    false,
 			HighRiskRequireApp: false,
 		},
-		ackWaiters:      make(map[string]chan proto.Approval),
-		decisionWaiters: make(map[string]chan proto.Approval),
-		fsStreams:       make(map[string]context.CancelFunc),
+		ackWaiters:          make(map[string]chan proto.Approval),
+		decisionWaiters:     make(map[string]chan proto.Approval),
+		fsStreams:           make(map[string]context.CancelFunc),
+		activeHookSessions:  make(map[string]int),
+		recentHookFallbacks: make(map[string]time.Time),
 	}
+	d.agyWatcher = agywatch.New(agywatch.Callbacks{
+		IsHookActive: func(sessionName string) bool {
+			if sessionName == "" {
+				return false
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			return d.activeHookSessions[sessionName] > 0
+		},
+		WasRecentHookFallback: func(sessionName string) bool {
+			if sessionName == "" {
+				return false
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			ts, ok := d.recentHookFallbacks[sessionName]
+			if !ok {
+				return false
+			}
+			if time.Since(ts) > 10*time.Second {
+				delete(d.recentHookFallbacks, sessionName)
+				return false
+			}
+			return true
+		},
+		RequestApproval: func(ctx context.Context, a proto.Approval) (proto.Approval, error) {
+			return d.handleApprovalPolicy(ctx, a, 0)
+		},
+	})
 	d.termMgr = term.NewManager(
 		func(streamID [16]byte, data []byte) {
 			frame := make([]byte, 17+len(data))
@@ -898,26 +936,31 @@ func (d *Daemon) serveLocalIPC(ctx context.Context) error {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		st := d.getSettings()
-		log.Printf("approval request: agent=%s tool=%s risk=%s mode=%s summary=%q",
-			req.Approval.Agent, req.Approval.ToolName, req.Approval.RiskLevel, st.ApprovalMode, req.Approval.Summary)
-		if st.ApprovalMode == "notify" {
-			d.forwardAttentionFallback(req.Approval, "仅通知模式")
-			writeLocalJSON(w, proto.Approval{Status: "fallback", DecisionReason: "仅通知模式"})
-			return
+		sess := strings.TrimSpace(req.Approval.TmuxSession)
+		if sess != "" {
+			d.mu.Lock()
+			d.activeHookSessions[sess]++
+			d.mu.Unlock()
 		}
-		if st.ApprovalMode == "auto" {
-			idleSt := idle.Detect()
-			if !idleSt.ShouldUsePhone(st.IdleThresholdSec) {
-				d.forwardAttentionFallback(req.Approval, "人在电脑前操作，直接走本地确认")
-				writeLocalJSON(w, proto.Approval{Status: "fallback", DecisionReason: "人在电脑前"})
+		res, err := d.handleApprovalPolicy(r.Context(), req.Approval, req.TimeoutSec)
+		if sess != "" {
+			d.mu.Lock()
+			if d.activeHookSessions[sess] <= 1 {
+				delete(d.activeHookSessions, sess)
+			} else {
+				d.activeHookSessions[sess]--
+			}
+			if err == nil && res.Status == "fallback" {
+				d.recentHookFallbacks[sess] = time.Now()
+			}
+			d.mu.Unlock()
+		}
+		if err != nil {
+			if errors.Is(err, errTunnelUnavailable) {
+				// Return 503 so ai-audit-hook falls back to direct HTTPS Relay approval instead of silently dropping!
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-		}
-
-		allowMacPrompt := st.ApprovalMode == "both"
-		res, err := d.requestRemoteApproval(r.Context(), req.Approval, req.TimeoutSec, allowMacPrompt)
-		if err != nil {
 			writeLocalJSON(w, proto.Approval{Status: "fallback", DecisionReason: err.Error()})
 			return
 		}
@@ -953,14 +996,51 @@ func (d *Daemon) forwardAttentionFallback(a proto.Approval, note string) {
 	})
 }
 
-func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, timeoutSec int, allowMacPrompt bool) (proto.Approval, error) {
+func (d *Daemon) handleApprovalPolicy(ctx context.Context, a proto.Approval, timeoutSec int) (proto.Approval, error) {
 	st := d.getSettings()
-	if timeoutSec <= 0 {
-		timeoutSec = st.DefaultTimeoutSec
+	log.Printf("approval request: agent=%s tool=%s risk=%s mode=%s summary=%q",
+		a.Agent, a.ToolName, a.RiskLevel, st.ApprovalMode, a.Summary)
+	if st.ApprovalMode == "notify" {
+		d.forwardAttentionFallback(a, "仅通知模式")
+		return proto.Approval{Status: "fallback", DecisionReason: "仅通知模式"}, nil
 	}
-	if timeoutSec <= 0 {
-		timeoutSec = 180
+	if st.ApprovalMode == "auto" {
+		idleSt := idle.Detect()
+		if !idleSt.ShouldUsePhone(st.IdleThresholdSec) {
+			d.forwardAttentionFallback(a, "人在电脑前操作，直接走本地确认")
+			return proto.Approval{Status: "fallback", DecisionReason: "人在电脑前"}, nil
+		}
 	}
+	allowMacPrompt := st.ApprovalMode == "both"
+	return d.requestRemoteApproval(ctx, a, timeoutSec, allowMacPrompt)
+}
+
+func (d *Daemon) waitForTunnel(ctx context.Context, maxWait time.Duration) bool {
+	deadline := time.Now().Add(maxWait)
+	for {
+		d.mu.Lock()
+		connected := d.wsConn != nil
+		d.mu.Unlock()
+		if connected {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
+func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, timeoutSec int, allowMacPrompt bool) (proto.Approval, error) {
+	if !d.waitForTunnel(ctx, 3*time.Second) {
+		return proto.Approval{}, errTunnelUnavailable
+	}
+	st := d.getSettings()
+	reqTimeoutSec := timeoutSec // 0 lets Relay apply its authoritative default_timeout_sec setting.
 
 	reqID := newReqID()
 	ackCh := make(chan proto.Approval, 1)
@@ -972,32 +1052,43 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 		"type":        "approval.create",
 		"req_id":      reqID,
 		"approval":    a,
-		"timeout_sec": timeoutSec,
+		"timeout_sec": reqTimeoutSec,
 	}) {
 		d.mu.Lock()
 		delete(d.ackWaiters, reqID)
 		d.mu.Unlock()
-		return proto.Approval{}, errors.New("tunnel offline")
+		return proto.Approval{}, errTunnelUnavailable
 	}
 
 	var created proto.Approval
 	select {
 	case c, ok := <-ackCh:
 		if !ok {
-			return proto.Approval{}, errors.New("tunnel disconnected")
+			return proto.Approval{}, errTunnelUnavailable
 		}
 		created = c
 	case <-time.After(6 * time.Second):
 		d.mu.Lock()
 		delete(d.ackWaiters, reqID)
 		d.mu.Unlock()
-		return proto.Approval{}, errors.New("relay ack timeout")
+		return proto.Approval{}, errTunnelUnavailable
 	case <-ctx.Done():
 		return proto.Approval{}, ctx.Err()
 	}
 
 	if created.Status != "pending" {
 		return created, nil
+	}
+
+	effectiveTimeoutSec := reqTimeoutSec
+	if created.ExpiresAt > created.CreatedAt {
+		effectiveTimeoutSec = int((created.ExpiresAt - created.CreatedAt + 999) / 1000)
+	}
+	if effectiveTimeoutSec <= 0 {
+		effectiveTimeoutSec = st.DefaultTimeoutSec
+	}
+	if effectiveTimeoutSec <= 0 {
+		effectiveTimeoutSec = 30
 	}
 
 	decCh := make(chan proto.Approval, 1)
@@ -1017,17 +1108,27 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 	var macPromptCh chan promptOutcome
 	cancelPrompt := func() {}
 	if allowMacPrompt && !idle.Detect().Locked {
+		hudSec := effectiveTimeoutSec
+		if created.ExpiresAt > 0 {
+			remMs := created.ExpiresAt - time.Now().UnixMilli()
+			if remMs > 0 {
+				hudSec = int((remMs + 999) / 1000)
+			} else {
+				hudSec = 1
+			}
+		}
 		var pCtx context.Context
 		pCtx, cancelPrompt = context.WithCancel(ctx)
 		macPromptCh = make(chan promptOutcome, 1)
+		timeoutAction := st.TimeoutAction
 		go func() {
-			r, err := prompt.Show(pCtx, a, timeoutSec)
+			r, err := prompt.Show(pCtx, a, hudSec, timeoutAction)
 			macPromptCh <- promptOutcome{res: r, err: err}
 		}()
 	}
 	defer cancelPrompt()
 
-	timer := time.NewTimer(time.Duration(timeoutSec+5) * time.Second)
+	timer := time.NewTimer(time.Duration(effectiveTimeoutSec+5) * time.Second)
 	defer timer.Stop()
 
 	for {
@@ -1040,16 +1141,22 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 				macPromptCh = nil
 				continue
 			}
+			decidedBy := macRes.res.DecidedBy
+			if decidedBy == "" {
+				decidedBy = "mac_local"
+			}
 			d.sendJSON(map[string]any{
 				"type":        "approval.decide",
 				"approval_id": created.ID,
 				"decision":    macRes.res.Decision,
 				"reason":      macRes.res.Reason,
+				"decided_by":  decidedBy,
 			})
 			return proto.Approval{
 				ID:             created.ID,
 				Status:         macRes.res.Decision,
 				DecisionReason: macRes.res.Reason,
+				DecidedBy:      decidedBy,
 			}, nil
 		case <-ctx.Done():
 			cancelPrompt()
@@ -1060,7 +1167,22 @@ func (d *Daemon) requestRemoteApproval(ctx context.Context, a proto.Approval, ti
 			return proto.Approval{ID: created.ID, Status: "canceled"}, ctx.Err()
 		case <-timer.C:
 			cancelPrompt()
-			return proto.Approval{ID: created.ID, Status: "fallback", DecisionReason: "本地等待超时"}, nil
+			curSt := d.getSettings()
+			switch curSt.TimeoutAction {
+			case "approve":
+				d.sendJSON(map[string]any{
+					"type":        "approval.decide",
+					"approval_id": created.ID,
+					"decision":    "approved",
+					"reason":      "审批超时，系统自动确认允许",
+					"decided_by":  "system_timeout",
+				})
+				return proto.Approval{ID: created.ID, Status: "approved", DecisionReason: "审批超时，系统自动确认允许", DecidedBy: "system_timeout"}, nil
+			case "deny":
+				return proto.Approval{ID: created.ID, Status: "denied", DecisionReason: "审批超时，系统自动拒绝", DecidedBy: "system_timeout"}, nil
+			default:
+				return proto.Approval{ID: created.ID, Status: "fallback", DecisionReason: "本地等待超时", DecidedBy: "system_timeout"}, nil
+			}
 		}
 	}
 }
@@ -1105,6 +1227,7 @@ func main() {
 	d.usageMgr.StartBackground(ctx)
 	go d.serveWebDashboard(ctx)
 	go d.runTunnel(ctx)
+	go d.agyWatcher.Run(ctx)
 	if err := d.serveLocalIPC(ctx); err != nil {
 		log.Fatalf("local IPC error: %v", err)
 	}

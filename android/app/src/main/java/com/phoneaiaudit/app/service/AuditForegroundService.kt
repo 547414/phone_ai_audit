@@ -203,9 +203,11 @@ class AuditForegroundService : Service() {
         when (obj.optString("type")) {
             "init" -> {
                 AuditRepository.onWsInit(obj.optJSONObject("status"), obj.optJSONArray("approvals"))
-                val requireApp = AuditRepository.status.value.settings.highRiskRequireApp
+                val curSettings = AuditRepository.status.value.settings
+                val requireApp = curSettings.highRiskRequireApp
+                val autoApprove = curSettings.timeoutAction == "approve"
                 AuditRepository.pendingApprovals.value.forEach {
-                    AuditNotifier.showApproval(this, it, requireApp)
+                    AuditNotifier.showApproval(this, it, requireApp, autoApprove)
                 }
                 val macText = if (AuditRepository.status.value.macOnline) "Mac 在线" else "Mac 离线"
                 updateForegroundText("在线 · $macText")
@@ -225,8 +227,13 @@ class AuditForegroundService : Service() {
                 val aObj = obj.optJSONObject("approval") ?: return
                 val item = ApprovalItem.fromJson(aObj)
                 AuditRepository.onApprovalCreated(item)
-                val requireApp = AuditRepository.status.value.settings.highRiskRequireApp
-                AuditNotifier.showApproval(this, item, requireApp)
+                val curSettings = AuditRepository.status.value.settings
+                AuditNotifier.showApproval(
+                    this,
+                    item,
+                    curSettings.highRiskRequireApp,
+                    curSettings.timeoutAction == "approve"
+                )
             }
 
             "approval.updated" -> {
@@ -234,6 +241,9 @@ class AuditForegroundService : Service() {
                 val item = ApprovalItem.fromJson(aObj)
                 AuditRepository.onApprovalUpdated(item)
                 AuditNotifier.cancelApproval(this, item.id)
+                AuditRepository.messages.value
+                    .filter { it.approvalId == item.id }
+                    .forEach { AuditNotifier.cancelMessage(this, it.id) }
             }
 
             "message.created" -> {

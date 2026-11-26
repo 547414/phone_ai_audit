@@ -171,9 +171,9 @@ func normalizeSettings(cfg *model.Settings) {
 		cfg.ApprovalMode = model.ModeAuto
 	}
 	switch cfg.TimeoutAction {
-	case model.TimeoutFallback, model.TimeoutDeny:
+	case model.TimeoutApprove, model.TimeoutFallback, model.TimeoutDeny:
 	default:
-		cfg.TimeoutAction = model.TimeoutFallback
+		cfg.TimeoutAction = model.TimeoutApprove
 	}
 	if cfg.IdleThresholdSec < 5 {
 		cfg.IdleThresholdSec = 5
@@ -181,8 +181,8 @@ func normalizeSettings(cfg *model.Settings) {
 	if cfg.IdleThresholdSec > 3600 {
 		cfg.IdleThresholdSec = 3600
 	}
-	if cfg.DefaultTimeoutSec < 15 {
-		cfg.DefaultTimeoutSec = 15
+	if cfg.DefaultTimeoutSec < 5 {
+		cfg.DefaultTimeoutSec = 5
 	}
 	if cfg.DefaultTimeoutSec > 600 {
 		cfg.DefaultTimeoutSec = 600
@@ -316,7 +316,10 @@ func (s *Store) ExpirePendingApprovals(ctx context.Context, nowMs int64, targetS
 
 	resolved := make([]model.Approval, 0, len(ids))
 	reason := "审批超时，已退回电脑端处理"
-	if targetStatus == model.StatusExpired {
+	switch targetStatus {
+	case model.StatusApproved:
+		reason = "审批超时，系统自动确认允许"
+	case model.StatusExpired:
 		reason = "审批超时，系统自动拒绝"
 	}
 	for _, id := range ids {
@@ -408,6 +411,17 @@ func (s *Store) MarkMessagesRead(ctx context.Context, ids []string) error {
 	}
 	q := fmt.Sprintf(`UPDATE messages SET read_at = ? WHERE read_at = 0 AND id IN (%s)`, strings.Join(placeholders, ","))
 	_, err := s.db.ExecContext(ctx, q, args...)
+	return err
+}
+
+func (s *Store) MarkMessagesReadByApprovalID(ctx context.Context, approvalID string) error {
+	if strings.TrimSpace(approvalID) == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE messages SET read_at = ? WHERE read_at = 0 AND approval_id = ?`,
+		time.Now().UnixMilli(), approvalID,
+	)
 	return err
 }
 

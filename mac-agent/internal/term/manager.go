@@ -271,6 +271,124 @@ func ListTmuxSessions() []proto.TmuxSession {
 	return res
 }
 
+type AgyPane struct {
+	SessionName string
+	PaneID      string
+	Command     string
+	Cwd         string
+	ProjectName string
+	Title       string
+}
+
+func ListAgyPanes() []AgyPane {
+	tmuxBin := FindTmux()
+	if tmuxBin == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	const sep = "\x1f"
+	format := strings.Join([]string{
+		"#{session_name}",
+		"#{pane_id}",
+		"#{pane_current_command}",
+		"#{pane_current_path}",
+		"#{pane_pid}",
+		"#{pane_title}",
+	}, sep)
+
+	args := []string{}
+	if sock := findTmuxSocket(); sock != "" {
+		args = append(args, "-S", sock)
+	}
+	args = append(args, "list-panes", "-a", "-F", format)
+
+	cmd := exec.CommandContext(ctx, tmuxBin, args...)
+	cmd.Env = enrichedEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var panes []AgyPane
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\r\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, sep)
+		if len(parts) < 6 {
+			continue
+		}
+		sessName, paneID, curCmd, cwd, panePid, paneTitle := parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
+		if detectAgent(sessName, curCmd, paneTitle, panePid) != "agy" {
+			continue
+		}
+		proj := filepath.Base(cwd)
+		if proj == "." || proj == "/" {
+			proj = ""
+		}
+		panes = append(panes, AgyPane{
+			SessionName: sessName,
+			PaneID:      paneID,
+			Command:     curCmd,
+			Cwd:         cwd,
+			ProjectName: proj,
+			Title:       paneTitle,
+		})
+	}
+	return panes
+}
+
+func CapturePane(paneID string, extraHistoryLines int) (string, error) {
+	tmuxBin := FindTmux()
+	if tmuxBin == "" {
+		return "", errors.New("tmux not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	args := []string{}
+	if sock := findTmuxSocket(); sock != "" {
+		args = append(args, "-S", sock)
+	}
+	args = append(args, "capture-pane", "-p", "-J", "-t", paneID)
+	if extraHistoryLines > 0 {
+		args = append(args, "-S", fmt.Sprintf("-%d", extraHistoryLines))
+	}
+
+	cmd := exec.CommandContext(ctx, tmuxBin, args...)
+	cmd.Env = enrichedEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func SendPaneKeys(paneID string, keys ...string) error {
+	if paneID == "" || len(keys) == 0 {
+		return nil
+	}
+	tmuxBin := FindTmux()
+	if tmuxBin == "" {
+		return errors.New("tmux not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	args := []string{}
+	if sock := findTmuxSocket(); sock != "" {
+		args = append(args, "-S", sock)
+	}
+	args = append(args, "send-keys", "-t", paneID)
+	args = append(args, keys...)
+
+	cmd := exec.CommandContext(ctx, tmuxBin, args...)
+	cmd.Env = enrichedEnv()
+	return cmd.Run()
+}
+
 func detectAgent(sessionName, curCmd, paneTitle, panePid string) string {
 	combined := strings.ToLower(sessionName + " " + curCmd + " " + paneTitle)
 	if strings.Contains(combined, "claude") {

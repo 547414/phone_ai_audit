@@ -192,7 +192,7 @@ func (s *Server) handleWaitApproval(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	timeoutSec := 180
 	if raw := r.URL.Query().Get("timeout"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 600 {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 620 {
 			timeoutSec = n
 		}
 	}

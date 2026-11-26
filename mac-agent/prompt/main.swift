@@ -10,12 +10,14 @@ struct PromptInput: Decodable {
     let risk_level: String?
     let risk_reasons: [String]?
     let timeout_sec: Int?
+    let timeout_action: String?
     let slot: Int?
 }
 
 struct PromptOutput: Encodable {
     let decision: String
     let reason: String
+    let decided_by: String
 }
 
 final class FloatingApprovalPanel: NSPanel {
@@ -34,8 +36,33 @@ final class PromptController: NSObject, NSTextFieldDelegate {
 
     init(input: PromptInput) {
         self.input = input
-        self.remainingSec = max(5, input.timeout_sec ?? 180)
+        self.remainingSec = max(1, input.timeout_sec ?? 30)
         super.init()
+    }
+
+    private var timeoutAction: String {
+        (input.timeout_action ?? "approve").lowercased()
+    }
+
+    private var autoApproveOnTimeout: Bool {
+        timeoutAction == "approve"
+    }
+
+    private func formatCountdown(_ sec: Int) -> String {
+        if autoApproveOnTimeout {
+            return "\(sec)s 自动允许"
+        }
+        return "\(sec)s"
+    }
+
+    private func countdownColor(_ sec: Int) -> NSColor {
+        if autoApproveOnTimeout {
+            return sec <= 10 ? .systemOrange : .systemGreen
+        }
+        if sec <= 10 || isHighRisk {
+            return .systemRed
+        }
+        return .secondaryLabelColor
     }
 
     func show() {
@@ -89,13 +116,18 @@ final class PromptController: NSObject, NSTextFieldDelegate {
             guard let self = self else { return }
             self.remainingSec -= 1
             if self.remainingSec <= 0 {
-                self.finish(decision: "fallback", reason: "电脑浮窗等待超时")
+                switch self.timeoutAction {
+                case "approve":
+                    self.finish(decision: "approved", reason: "审批超时，系统自动确认允许", decidedBy: "system_timeout")
+                case "deny":
+                    self.finish(decision: "denied", reason: "审批超时，系统自动拒绝", decidedBy: "system_timeout")
+                default:
+                    self.finish(decision: "fallback", reason: "审批超时，已退回电脑端处理", decidedBy: "system_timeout")
+                }
                 return
             }
-            self.timerLabel.stringValue = "\(self.remainingSec)s"
-            if self.remainingSec <= 25 {
-                self.timerLabel.textColor = .systemRed
-            }
+            self.timerLabel.stringValue = self.formatCountdown(self.remainingSec)
+            self.timerLabel.textColor = self.countdownColor(self.remainingSec)
         }
     }
 
@@ -131,11 +163,12 @@ final class PromptController: NSObject, NSTextFieldDelegate {
         closeBtn.frame = NSRect(x: width - pad - 20, y: curY, width: 20, height: 22)
         root.addSubview(closeBtn)
 
-        timerLabel = NSTextField(labelWithString: "\(remainingSec)s")
-        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        timerLabel.textColor = isHighRisk ? .systemRed : .secondaryLabelColor
+        let timerW: CGFloat = autoApproveOnTimeout ? 92 : 44
+        timerLabel = NSTextField(labelWithString: formatCountdown(remainingSec))
+        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
+        timerLabel.textColor = countdownColor(remainingSec)
         timerLabel.alignment = .right
-        timerLabel.frame = NSRect(x: width - pad - 20 - 44, y: curY + 2, width: 40, height: 18)
+        timerLabel.frame = NSRect(x: width - pad - 20 - timerW - 4, y: curY + 2, width: timerW, height: 18)
         root.addSubview(timerLabel)
 
         let project = (input.project_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,7 +177,7 @@ final class PromptController: NSObject, NSTextFieldDelegate {
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
-        let titleW = max(60, (width - pad - 68) - curX)
+        let titleW = max(56, (width - pad - 20 - timerW - 8) - curX)
         titleLabel.frame = NSRect(x: curX, y: curY + 2, width: titleW, height: 18)
         root.addSubview(titleLabel)
 
@@ -323,25 +356,25 @@ final class PromptController: NSObject, NSTextFieldDelegate {
     }
 
     @objc private func onApprove() {
-        finish(decision: "approved", reason: "")
+        finish(decision: "approved", reason: "", decidedBy: "mac_local")
     }
 
     @objc private func onDeny() {
         let r = reasonField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        finish(decision: "denied", reason: r)
+        finish(decision: "denied", reason: r, decidedBy: "mac_local")
     }
 
     @objc private func onFallback() {
-        finish(decision: "fallback", reason: "电脑端选择退回终端处理")
+        finish(decision: "fallback", reason: "电脑端选择退回终端处理", decidedBy: "mac_local")
     }
 
-    private func finish(decision: String, reason: String) {
+    private func finish(decision: String, reason: String, decidedBy: String = "mac_local") {
         guard !finished else { return }
         finished = true
         countdownTimer?.invalidate()
         panel?.orderOut(nil)
 
-        let out = PromptOutput(decision: decision, reason: reason)
+        let out = PromptOutput(decision: decision, reason: reason, decided_by: decidedBy)
         if let data = try? JSONEncoder().encode(out), let str = String(data: data, encoding: .utf8) {
             FileHandle.standardOutput.write((str + "\n").data(using: .utf8)!)
         }
@@ -366,7 +399,8 @@ if let decoded = try? JSONDecoder().decode(PromptInput.self, from: rawInput) {
         summary: "请求执行操作",
         risk_level: "low",
         risk_reasons: nil,
-        timeout_sec: 180,
+        timeout_sec: 30,
+        timeout_action: "approve",
         slot: 0
     )
 }

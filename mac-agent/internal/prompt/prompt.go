@@ -19,8 +19,9 @@ import (
 var ErrUnavailable = errors.New("ai-audit-prompt binary not found")
 
 type Result struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
+	DecidedBy string `json:"decided_by,omitempty"`
 }
 
 var (
@@ -72,7 +73,7 @@ func FindBinary() string {
 
 // Show launches the native macOS floating approval HUD and waits for a local user decision
 // or ctx cancellation (e.g., when the phone approves/denies first).
-func Show(ctx context.Context, a proto.Approval, timeoutSec int) (Result, error) {
+func Show(ctx context.Context, a proto.Approval, timeoutSec int, timeoutAction string) (Result, error) {
 	bin := FindBinary()
 	if bin == "" {
 		return Result{}, ErrUnavailable
@@ -81,16 +82,21 @@ func Show(ctx context.Context, a proto.Approval, timeoutSec int) (Result, error)
 	slot := acquireSlot()
 	defer releaseSlot(slot)
 
+	if strings.TrimSpace(timeoutAction) == "" {
+		timeoutAction = "approve"
+	}
+
 	payload, err := json.Marshal(map[string]any{
-		"agent":        a.Agent,
-		"project_name": a.ProjectName,
-		"task_title":   a.TaskTitle,
-		"tool_name":    a.ToolName,
-		"summary":      a.Summary,
-		"risk_level":   a.RiskLevel,
-		"risk_reasons": a.RiskReasons,
-		"timeout_sec":  timeoutSec,
-		"slot":         slot,
+		"agent":          a.Agent,
+		"project_name":   a.ProjectName,
+		"task_title":     a.TaskTitle,
+		"tool_name":      a.ToolName,
+		"summary":        a.Summary,
+		"risk_level":     a.RiskLevel,
+		"risk_reasons":   a.RiskReasons,
+		"timeout_sec":    timeoutSec,
+		"timeout_action": timeoutAction,
+		"slot":           slot,
 	})
 	if err != nil {
 		return Result{}, err

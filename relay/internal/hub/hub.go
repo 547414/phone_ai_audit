@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -234,7 +235,7 @@ func newStreamID() ([16]byte, string) {
 
 func (h *Hub) StartBackground(ctx context.Context) {
 	go func() {
-		sweepTicker := time.NewTicker(2 * time.Second)
+		sweepTicker := time.NewTicker(1 * time.Second)
 		pruneTicker := time.NewTicker(6 * time.Hour)
 		defer sweepTicker.Stop()
 		defer pruneTicker.Stop()
@@ -258,7 +259,10 @@ func (h *Hub) sweepExpiredApprovals(ctx context.Context) {
 		return
 	}
 	target := model.StatusFallback
-	if cfg.TimeoutAction == model.TimeoutDeny {
+	switch cfg.TimeoutAction {
+	case model.TimeoutApprove:
+		target = model.StatusApproved
+	case model.TimeoutDeny:
 		target = model.StatusExpired
 	}
 	resolved, err := h.store.ExpirePendingApprovals(ctx, time.Now().UnixMilli(), target)
@@ -368,8 +372,10 @@ func (h *Hub) CreateApproval(ctx context.Context, req model.Approval, timeoutSec
 		req.RiskLevel = "low"
 	}
 
-	// Immediate fallback if mode=notify or no Android client is connected.
-	if cfg.ApprovalMode == model.ModeNotify || h.AppOnlineCount() == 0 {
+	// Immediate fallback if mode=notify, or if no Android client is connected outside `both` mode.
+	// In `both` mode, keep the approval pending so the Mac floating HUD still appears immediately,
+	// Android receives it upon brief WS reconnect, and timeout auto-approve remains active.
+	if cfg.ApprovalMode == model.ModeNotify || (h.AppOnlineCount() == 0 && cfg.ApprovalMode != model.ModeBoth) {
 		req.Status = model.StatusFallback
 		req.DecidedAt = now
 		if cfg.ApprovalMode == model.ModeNotify {
@@ -497,7 +503,10 @@ func (h *Hub) onApprovalResolved(ctx context.Context, a model.Approval) {
 		"approval": a,
 	})
 
-	// Record an audit timeline entry in messages
+	// Mark any existing unread messages linked to this approval as read.
+	_ = h.store.MarkMessagesReadByApprovalID(ctx, a.ID)
+
+	// Record an audit timeline entry in messages (marked read so resolved/timed-out approvals don't leave unread badges)
 	statusLabel := map[string]string{
 		model.StatusApproved: "已允许",
 		model.StatusDenied:   "已拒绝",
@@ -506,13 +515,16 @@ func (h *Hub) onApprovalResolved(ctx context.Context, a model.Approval) {
 		model.StatusCanceled: "Mac 端已取消",
 	}[a.Status]
 	sourceTag := ""
-	if a.DecidedBy == "mac_local" {
+	if a.Status == model.StatusApproved && a.DecidedBy == "system_timeout" {
+		statusLabel = "超时自动允许"
+	} else if a.DecidedBy == "mac_local" {
 		sourceTag = "（电脑端）"
 	}
 	body := a.Summary
 	if a.DecisionReason != "" {
 		body = fmt.Sprintf("%s\n备注：%s", body, a.DecisionReason)
 	}
+	nowMs := time.Now().UnixMilli()
 	_, _ = h.CreateMessage(ctx, model.Message{
 		Agent:       a.Agent,
 		EventType:   "approval_result",
@@ -523,6 +535,8 @@ func (h *Hub) onApprovalResolved(ctx context.Context, a model.Approval) {
 		ProjectName: a.ProjectName,
 		TmuxSession: a.TmuxSession,
 		ApprovalID:  a.ID,
+		CreatedAt:   nowMs,
+		ReadAt:      nowMs,
 	})
 }
 
@@ -1008,6 +1022,7 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 		TimeoutSec    int                 `json:"timeout_sec"`
 		ApprovalID    string              `json:"approval_id"`
 		Decision      string              `json:"decision"`
+		DecidedBy     string              `json:"decided_by"`
 		Message       *model.Message      `json:"message"`
 		StreamID      string              `json:"stream_id"`
 		Cols          int                 `json:"cols"`
@@ -1072,7 +1087,11 @@ func (h *Hub) handleMacText(ctx context.Context, mac *wsClient, data []byte) {
 		}
 	case "approval.decide":
 		if env.ApprovalID != "" && env.Decision != "" {
-			_, _ = h.DecideApproval(ctx, env.ApprovalID, env.Decision, env.Reason, "once", "mac_local")
+			decidedBy := strings.TrimSpace(env.DecidedBy)
+			if decidedBy == "" {
+				decidedBy = "mac_local"
+			}
+			_, _ = h.DecideApproval(ctx, env.ApprovalID, env.Decision, env.Reason, "once", decidedBy)
 		}
 	case "approval.cancel":
 		if env.ApprovalID != "" {

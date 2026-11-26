@@ -374,11 +374,11 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 	}
 
 	if toolName == "run_command" {
-		bypass, _ := args["BypassSandbox"].(bool)
-		cmdLine := strVal(args, "CommandLine")
-		toolSummary := strVal(args, "toolSummary")
+		bypass := boolArg(args, "BypassSandbox", "bypassSandbox", "bypass_sandbox")
+		cmdLine := strArg(args, "CommandLine", "commandLine", "command", "cmd")
+		toolSummary := strArg(args, "toolSummary", "ToolSummary")
 		rk := risk.Evaluate(toolName, cmdLine, bypass, false)
-		needApproval, extraReasons := shouldApproveAgyCommand(cmdLine, bypass, rk.Level)
+		needApproval, extraReasons := shouldApproveAgyCommand(cmdLine, bypass, rk.Level, roots)
 		if needApproval {
 			summary := toolSummary
 			if summary == "" {
@@ -409,9 +409,9 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 	}
 
 	if toolName == "ask_permission" {
-		action := strVal(args, "Action")
-		target := strVal(args, "Target")
-		reason := strVal(args, "Reason")
+		action := strArg(args, "Action", "action")
+		target := strArg(args, "Target", "target")
+		reason := strArg(args, "Reason", "reason")
 		summary := fmt.Sprintf("请求权限 %s(%s)", action, target)
 		if reason != "" {
 			summary += " - " + oneLine(reason, 100)
@@ -436,13 +436,10 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 		}
 	}
 
-	if toolName == "write_file" || toolName == "edit_file" || toolName == "write_to_file" || toolName == "replace_file_content" || toolName == "multi_replace_file_content" || toolName == "delete_file" || toolName == "remove_file" {
+	if toolName == "write_file" || toolName == "edit_file" || toolName == "write_to_file" || toolName == "replace_file_content" || toolName == "multi_replace_file_content" || toolName == "delete_file" || toolName == "remove_file" || toolName == "move_file" || toolName == "rename_file" || toolName == "apply_patch" {
 		if am, ok := args["ArtifactMetadata"].(map[string]any); ok {
 			if rf, _ := am["RequestFeedback"].(bool); rf {
-				target := strVal(args, "Path")
-				if target == "" {
-					target = strVal(args, "TargetFile")
-				}
+				target := strArg(args, "Path", "TargetFile", "path", "file_path")
 				name := filepath.Base(target)
 				sum := oneLine(strVal(am, "Summary"), 160)
 				body := name
@@ -466,10 +463,7 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 			}
 		}
 
-		target := strVal(args, "Path")
-		if target == "" {
-			target = strVal(args, "TargetFile")
-		}
+		target := strArg(args, "Path", "TargetFile", "Destination", "dst", "path", "file_path")
 		allowedRoots := append([]string(nil), roots...)
 		if artDir := strVal(data, "artifactDirectoryPath"); artDir != "" {
 			allowedRoots = append(allowedRoots, artDir)
@@ -497,6 +491,61 @@ func parseAgy(event, raw string, data map[string]any, tmuxSess string) ParsedEve
 		}
 	}
 
+	if toolName == "read_file" || toolName == "view_file" {
+		target := strArg(args, "Path", "AbsolutePath", "path", "file_path")
+		allowedRoots := append([]string(nil), roots...)
+		if artDir := strVal(data, "artifactDirectoryPath"); artDir != "" {
+			allowedRoots = append(allowedRoots, artDir)
+		}
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			allowedRoots = append(allowedRoots, filepath.Join(home, ".gemini"), filepath.Join(home, ".agents"))
+		}
+		allowedRoots = append(allowedRoots, "/tmp", "/private/tmp")
+		if target != "" && (isSensitivePath(target) || isOutsideWorkspace(target, allowedRoots)) {
+			rk := risk.Evaluate(toolName, target, false, true)
+			return ParsedEvent{
+				Kind:       ActionApproval,
+				DefaultOut: "{\"decision\":\"allow\"}\n",
+				Approval: proto.Approval{
+					Agent:       "agy",
+					SessionID:   convID,
+					TmuxSession: tmuxSess,
+					TaskTitle:   title,
+					ProjectName: proj,
+					Cwd:         cwd,
+					ToolName:    toolName,
+					Summary:     fmt.Sprintf("读取敏感或工作区外文件: %s", displayPath(target)),
+					PayloadJSON: prettyJSON(args),
+					RiskLevel:   rk.Level,
+					RiskReasons: mergeUniqueStrings(rk.Reasons, []string{"读取敏感或工作区外路径"}),
+				},
+			}
+		}
+	}
+
+	if isAgyExternalMCPTool(toolName) {
+		detail := extractToolDetail(toolName, args)
+		summary := formatToolSummary(toolName, detail)
+		rk := risk.Evaluate(toolName, detail, false, false)
+		return ParsedEvent{
+			Kind:       ActionApproval,
+			DefaultOut: "{\"decision\":\"allow\"}\n",
+			Approval: proto.Approval{
+				Agent:       "agy",
+				SessionID:   convID,
+				TmuxSession: tmuxSess,
+				TaskTitle:   title,
+				ProjectName: proj,
+				Cwd:         cwd,
+				ToolName:    toolName,
+				Summary:     summary,
+				PayloadJSON: prettyJSON(args),
+				RiskLevel:   rk.Level,
+				RiskReasons: mergeUniqueStrings(rk.Reasons, []string{"调用外部 MCP / 扩展工具"}),
+			},
+		}
+	}
+
 	return ParsedEvent{Kind: ActionNone, DefaultOut: "{\"decision\":\"allow\"}\n"}
 }
 
@@ -506,20 +555,24 @@ type agyCmdRule struct {
 }
 
 var agyApprovalCmdRules = []agyCmdRule{
-	{regexp.MustCompile(`(?i)\bgit\s+(push|commit|rebase|merge|cherry-pick|revert|tag\s+-[df]|branch\s+-D|checkout\s+--|restore)\b`), "涉及 Git 提交/推送或历史变更"},
+	{regexp.MustCompile(`(?i)\bgit\s+(push|commit|pull|fetch|rebase|merge|cherry-pick|revert|reset|clean|stash|tag\s+-[df]|branch\s+-[dD]|checkout\s+--|restore)\b`), "涉及 Git 提交/推送/拉取或历史变更"},
 	{regexp.MustCompile(`(?i)\b(ssh|scp|rsync|sftp|kubectl|helm|terraform|ansible|systemctl|nginx|certbot|launchctl)\b`), "涉及远程主机或系统服务操作"},
 	{regexp.MustCompile(`(?i)\bdocker\s+(push|rm|rmi|system\s+prune|compose\s+(up|down|restart)|run|exec|stop|kill)\b`), "涉及 Docker 容器或镜像变更"},
 	{regexp.MustCompile(`(?i)\bgh\s+(pr\s+(create|merge|close|edit)|release\s+(create|delete|upload)|issue\s+(create|close)|repo\s+(create|delete))\b`), "涉及 GitHub 远端写入操作"},
 	{regexp.MustCompile(`(?i)\b(npm|pnpm|yarn|cargo|gem|poetry|twine)\s+(publish|upload)\b`), "涉及软件包发布上传"},
-	{regexp.MustCompile(`(?i)\b(curl|wget)\b[^\n]*(\s-(X|d|F)\b|--request\b|--data\b|--upload-file\b)`), "涉及带写入副作用的网络请求"},
-	{regexp.MustCompile(`(?i)\b(killall|pkill|shutdown|reboot|diskutil)\b`), "涉及系统进程终止或磁盘操作"},
+	{regexp.MustCompile(`(?i)\b(brew|npm|pnpm|yarn|pip|pip3|uv)\s+(install|uninstall|remove|upgrade)\b`), "涉及外部依赖安装或卸载"},
+	{regexp.MustCompile(`(?i)\b(curl|wget)\b`), "涉及网络请求（沙箱外可能触发授权）"},
+	{regexp.MustCompile(`(?i)\b(killall|pkill|shutdown|reboot|diskutil|chmod|chown)\b`), "涉及系统进程、权限或磁盘操作"},
+	{regexp.MustCompile(`(?i)(^|[;&|]\s*)rm\s+`), "涉及文件删除操作"},
 }
+
+var absPathInCmdRe = regexp.MustCompile(`(?:^|[\s"'=:])(/(?:Users|home|etc|var|opt|Library|System|Applications)/[^\s"'|;&>)]+|~/[^\s"'|;&>)]*)`)
 
 // shouldApproveAgyCommand decides whether an Antigravity run_command PreToolUse call
 // should trigger Phone/Mac dual-end approval even when BypassSandbox is false, because
-// AGY's built-in auto/default policy still prompts for git push/commit, high-risk, or
-// external side-effect commands.
-func shouldApproveAgyCommand(cmdLine string, bypass bool, riskLevel string) (bool, []string) {
+// AGY's built-in auto/default policy still prompts for git writes, network, external paths,
+// or high-risk commands.
+func shouldApproveAgyCommand(cmdLine string, bypass bool, riskLevel string, roots []string) (bool, []string) {
 	if bypass || riskLevel == "high" {
 		return true, nil
 	}
@@ -529,7 +582,64 @@ func shouldApproveAgyCommand(cmdLine string, bypass bool, riskLevel string) (boo
 			extra = append(extra, r.reason)
 		}
 	}
+	if len(roots) > 0 {
+		allowed := append([]string(nil), roots...)
+		allowed = append(allowed, "/tmp", "/private/tmp", "/opt/homebrew", "/usr/local")
+		for _, m := range absPathInCmdRe.FindAllStringSubmatch(cmdLine, -1) {
+			if len(m) < 2 {
+				continue
+			}
+			p := strings.TrimRight(m[1], ".,;:")
+			if isOutsideWorkspace(p, allowed) {
+				extra = append(extra, "命令访问工作区外路径")
+				break
+			}
+		}
+	}
 	return len(extra) > 0, extra
+}
+
+func isSensitivePath(target string) bool {
+	p := strings.ToLower(normalizePath(target))
+	base := strings.ToLower(filepath.Base(p))
+	if base == ".env" || strings.HasPrefix(base, ".env.") || strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key") || strings.HasPrefix(base, "id_rsa") || strings.HasPrefix(base, "id_ed25519") {
+		return true
+	}
+	for _, seg := range []string{"/.ssh/", "/.aws/", "/.kube/", "/.gnupg/", "/etc/"} {
+		if strings.Contains(p, seg) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAgyExternalMCPTool(toolName string) bool {
+	tl := strings.ToLower(strings.TrimSpace(toolName))
+	if tl == "" {
+		return false
+	}
+	return strings.HasPrefix(tl, "mcp_") || strings.HasPrefix(tl, "mcp__")
+}
+
+func boolArg(m map[string]any, keys ...string) bool {
+	if m == nil {
+		return false
+	}
+	for _, k := range keys {
+		if v, ok := m[k].(bool); ok {
+			return v
+		}
+	}
+	return false
+}
+
+func strArg(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v := strVal(m, k); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func mergeUniqueStrings(a, b []string) []string {

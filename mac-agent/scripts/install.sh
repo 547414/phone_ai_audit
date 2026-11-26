@@ -27,7 +27,7 @@ echo "==> 1. 安装二进制与 ai-tmux 包装脚本到 $BIN_DIR"
 install -m 755 "$ROOT_DIR/dist/ai-audit-agent" "$BIN_DIR/ai-audit-agent"
 install -m 755 "$ROOT_DIR/dist/ai-audit-hook" "$BIN_DIR/ai-audit-hook"
 install -m 755 "$ROOT_DIR/dist/ai-audit" "$BIN_DIR/ai-audit"
-if [[ ! -x "$ROOT_DIR/dist/ai-audit-prompt" && -f "$ROOT_DIR/mac-agent/prompt/main.swift" ]] && command -v swiftc >/dev/null 2>&1; then
+if [[ ( ! -x "$ROOT_DIR/dist/ai-audit-prompt" || "$ROOT_DIR/mac-agent/prompt/main.swift" -nt "$ROOT_DIR/dist/ai-audit-prompt" ) && -f "$ROOT_DIR/mac-agent/prompt/main.swift" ]] && command -v swiftc >/dev/null 2>&1; then
   echo "    编译 Mac 原生悬浮审批程序 ai-audit-prompt..."
   mkdir -p "$ROOT_DIR/dist"
   swiftc -O "$ROOT_DIR/mac-agent/prompt/main.swift" -o "$ROOT_DIR/dist/ai-audit-prompt"
@@ -77,7 +77,7 @@ claude_cfg["hooks"] = {
                 {
                     "type": "command",
                     "command": f"{hook_bin} claude PermissionRequest",
-                    "timeout": 240,
+                    "timeout": 620,
                 }
             ],
         }
@@ -121,7 +121,7 @@ codex_hooks = {
                     {
                         "type": "command",
                         "command": f"{hook_bin} codex PermissionRequest",
-                        "timeout": 240,
+                        "timeout": 620,
                     }
                 ],
             }
@@ -156,12 +156,12 @@ agy_hooks = {
         ],
         "PreToolUse": [
             {
-                "matcher": "ask_question|ask_permission|run_command|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|delete_file|remove_file",
+                "matcher": "*",
                 "hooks": [
                     {
                         "type": "command",
                         "command": f"{hook_bin} agy PreToolUse",
-                        "timeout": 240,
+                        "timeout": 620,
                     }
                 ],
             }

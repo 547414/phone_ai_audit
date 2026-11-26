@@ -72,6 +72,8 @@ fun MessagesScreen(
     val pendingAll by AuditRepository.pendingApprovals.collectAsState()
     val recentAll by AuditRepository.recentApprovals.collectAsState()
     val allMessages by AuditRepository.messages.collectAsState()
+    val status by AuditRepository.status.collectAsState()
+    val autoApproveOnTimeout = status.settings.timeoutAction == "approve"
 
     // Primary category: "all" (全部), "approval" (审批), "notice" (通知)
     var category by remember { mutableStateOf("all") }
@@ -242,6 +244,7 @@ fun MessagesScreen(
                             item = item,
                             nowMs = nowMs,
                             busy = busyId == item.id,
+                            autoApproveOnTimeout = autoApproveOnTimeout,
                             onApprove = { submitDecision(item, "approved") },
                             onDeny = {
                                 denyReason = ""

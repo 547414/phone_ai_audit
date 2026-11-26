@@ -75,6 +75,8 @@ fun ApprovalsScreen(
     val p = LocalIosPalette.current
     val pending by AuditRepository.pendingApprovals.collectAsState()
     val recent by AuditRepository.recentApprovals.collectAsState()
+    val status by AuditRepository.status.collectAsState()
+    val autoApproveOnTimeout = status.settings.timeoutAction == "approve"
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -165,6 +167,7 @@ fun ApprovalsScreen(
                         item = item,
                         nowMs = nowMs,
                         busy = busyId == item.id,
+                        autoApproveOnTimeout = autoApproveOnTimeout,
                         onApprove = { submitDecision(item, "approved") },
                         onDeny = {
                             denyReason = ""
@@ -250,6 +253,7 @@ internal fun PendingApprovalCard(
     item: ApprovalItem,
     nowMs: Long,
     busy: Boolean,
+    autoApproveOnTimeout: Boolean = true,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     onFallback: () -> Unit,
@@ -260,8 +264,15 @@ internal fun PendingApprovalCard(
     val totalMs = (item.expiresAt - item.createdAt).coerceAtLeast(1000L)
     val leftMs = (item.expiresAt - nowMs).coerceAtLeast(0L)
     val progress = (leftMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
-    val leftSec = (leftMs / 1000L).toInt()
-    val accent = if (item.isHighRisk) p.red else p.accent
+    val leftSec = ((leftMs + 999L) / 1000L).toInt().coerceAtLeast(0)
+    val accent = if (item.isHighRisk) p.red else if (autoApproveOnTimeout) p.green else p.accent
+    val countdownText = if (autoApproveOnTimeout) "${leftSec}s 自动允许" else "${leftSec}s"
+    val countdownColor = when {
+        autoApproveOnTimeout && leftSec <= 10 -> p.orange
+        autoApproveOnTimeout -> p.green
+        leftSec <= 10 -> p.red
+        else -> accent
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -298,9 +309,9 @@ internal fun PendingApprovalCard(
                     }
                 }
                 Text(
-                    "${leftSec}s",
-                    color = if (leftSec < 25) p.red else accent,
-                    fontSize = 14.sp,
+                    countdownText,
+                    color = countdownColor,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -440,12 +451,14 @@ internal fun PendingApprovalCard(
 @Composable
 internal fun HistoryApprovalRow(item: ApprovalItem, onClick: (() -> Unit)? = null) {
     val p = LocalIosPalette.current
-    val (label, color) = when (item.status) {
-        "approved" -> "已允许" to p.green
-        "denied" -> "已拒绝" to p.red
-        "fallback" -> "退回电脑" to p.orange
-        "expired" -> "超时拒绝" to p.red
-        "canceled" -> "已取消" to p.secondaryLabel
+    val (label, color) = when {
+        item.status == "approved" && (item.decidedBy == "system_timeout" || item.decisionReason.contains("超时")) -> "超时自动允许" to p.green
+        item.status == "approved" && item.decidedBy == "mac_local" -> "电脑已允许" to p.green
+        item.status == "approved" -> "已允许" to p.green
+        item.status == "denied" -> "已拒绝" to p.red
+        item.status == "fallback" -> "退回电脑" to p.orange
+        item.status == "expired" -> "超时拒绝" to p.red
+        item.status == "canceled" -> "已取消" to p.secondaryLabel
         else -> item.status to p.secondaryLabel
     }
     Column(

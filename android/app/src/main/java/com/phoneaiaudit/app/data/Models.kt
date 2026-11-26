@@ -25,6 +25,7 @@ data class ApprovalItem(
     val status: String,
     val decisionReason: String,
     val decisionScope: String,
+    val decidedBy: String = "",
     val createdAt: Long,
     val expiresAt: Long,
     val decidedAt: Long
@@ -71,6 +72,7 @@ data class ApprovalItem(
                 status = o.optString("status", "pending"),
                 decisionReason = o.optString("decision_reason"),
                 decisionScope = o.optString("decision_scope"),
+                decidedBy = o.optString("decided_by"),
                 createdAt = o.optLong("created_at"),
                 expiresAt = o.optLong("expires_at"),
                 decidedAt = o.optLong("decided_at")
@@ -114,8 +116,8 @@ data class AuditMessage(
 data class RelaySettings(
     val approvalMode: String = "auto",
     val idleThresholdSec: Int = 60,
-    val defaultTimeoutSec: Int = 180,
-    val timeoutAction: String = "fallback",
+    val defaultTimeoutSec: Int = 30,
+    val timeoutAction: String = "approve",
     val terminalEnabled: Boolean = true,
     val filesEnabled: Boolean = true,
     val macAwakeEnabled: Boolean = false,
@@ -127,8 +129,8 @@ data class RelaySettings(
             return RelaySettings(
                 approvalMode = o.optString("approval_mode", "auto"),
                 idleThresholdSec = o.optInt("idle_threshold_sec", 60),
-                defaultTimeoutSec = o.optInt("default_timeout_sec", 180),
-                timeoutAction = o.optString("timeout_action", "fallback"),
+                defaultTimeoutSec = o.optInt("default_timeout_sec", 30),
+                timeoutAction = o.optString("timeout_action", "approve"),
                 terminalEnabled = o.optBoolean("terminal_enabled", true),
                 filesEnabled = o.optBoolean("files_enabled", true),
                 macAwakeEnabled = o.optBoolean("mac_awake_enabled", false),

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,27 @@ func main() {
 			os.Exit(1)
 		}
 		patchSettings(cfg, map[string]any{"approval_mode": os.Args[2]})
+	case "timeout":
+		if len(os.Args) < 3 {
+			fmt.Println("用法: ai-audit timeout <秒数, 5-600>")
+			os.Exit(1)
+		}
+		sec, err := strconv.Atoi(os.Args[2])
+		if err != nil || sec < 5 || sec > 600 {
+			fmt.Fprintln(os.Stderr, "超时时长须为 5~600 之间的整数秒")
+			os.Exit(1)
+		}
+		patchSettings(cfg, map[string]any{"default_timeout_sec": sec})
+	case "auto-approve":
+		if len(os.Args) < 3 || (os.Args[2] != "on" && os.Args[2] != "off") {
+			fmt.Println("用法: ai-audit auto-approve on|off")
+			os.Exit(1)
+		}
+		act := "fallback"
+		if os.Args[2] == "on" {
+			act = "approve"
+		}
+		patchSettings(cfg, map[string]any{"timeout_action": act})
 	case "awake":
 		if len(os.Args) < 3 {
 			fmt.Println("用法: ai-audit awake on|off")
@@ -82,6 +104,8 @@ func printHelp() {
   ai-audit usage                          查看 Claude / Codex / Antigravity 用量与配额重置时间
   ai-audit web                            在浏览器打开本机 Agent 用量看板网页
   ai-audit mode auto|both|phone|notify    切换审批模式 (智能离座 / 双端同步 / 始终手机 / 仅通知)
+  ai-audit timeout <秒>                   设置审批弹窗超时时长 (5-600秒，默认 30 秒，Mac/手机同步生效)
+  ai-audit auto-approve on|off            开启/关闭超时自动确认授权 (默认开启)
   ai-audit awake on|off                   开启/关闭 Mac 防休眠 (caffeinate)
   ai-audit terminal on|off                开启/关闭远程交互终端总开关
   ai-audit files on|off                   开启/关闭远程文件查看/编辑与 Git 操作总开关
@@ -300,17 +324,17 @@ func cmdTestApproval(cfg config.Config) {
 
 	// Prefer routing through the local daemon so `both` (dual-end) and `auto` modes behave identically to real hooks.
 	unixCli := &http.Client{
-		Timeout: 105 * time.Second,
+		Timeout: 630 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "unix", cfg.SocketPath)
 			},
 		},
 	}
-	reqBody, _ := json.Marshal(proto.HookApprovalReq{Approval: approval, TimeoutSec: 90})
+	reqBody, _ := json.Marshal(proto.HookApprovalReq{Approval: approval, TimeoutSec: 0})
 	if ureq, err := http.NewRequest(http.MethodPost, "http://unix/local/approval", bytes.NewReader(reqBody)); err == nil {
 		ureq.Header.Set("Content-Type", "application/json")
-		fmt.Println("已通过本机守护进程发起测试审批，等待决策中 (最长 90 秒)...")
+		fmt.Println("已通过本机守护进程发起测试审批，按当前配置超时时长等待决策中...")
 		if uresp, err := unixCli.Do(ureq); err == nil {
 			defer uresp.Body.Close()
 			resBytes, _ := io.ReadAll(uresp.Body)
@@ -333,25 +357,34 @@ func cmdTestApproval(cfg config.Config) {
 		"payload_json": approval.PayloadJSON,
 		"risk_level":   approval.RiskLevel,
 		"risk_reasons": approval.RiskReasons,
-		"timeout_sec":  90,
+		"timeout_sec":  0,
 	})
 	if err != nil || code >= 300 {
 		fmt.Fprintf(os.Stderr, "创建审批失败 (code=%d): %v %s\n", code, err, string(data))
 		os.Exit(1)
 	}
 	var created struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		CreatedAt int64  `json:"created_at"`
+		ExpiresAt int64  `json:"expires_at"`
 	}
 	_ = json.Unmarshal(data, &created)
+	waitSec := 40
+	if created.ExpiresAt > created.CreatedAt {
+		waitSec = int((created.ExpiresAt-created.CreatedAt+999)/1000) + 10
+	}
+	if waitSec > 620 {
+		waitSec = 620
+	}
 	fmt.Printf("已发起审批 id=%s status=%s\n", created.ID, created.Status)
 	if created.Status != "pending" {
 		fmt.Println("非 pending 状态（可能是手机未在线或仅通知模式）:", string(data))
 		return
 	}
-	fmt.Println("等待手机端审批中 (最长 90 秒)...")
-	longCli := &http.Client{Timeout: 100 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	req, _ := http.NewRequest(http.MethodGet, cfg.ServerURL+"/api/v1/approvals/"+created.ID+"/wait?timeout=90", nil)
+	fmt.Printf("等待手机端审批中 (最长 %d 秒)...\n", waitSec)
+	longCli := &http.Client{Timeout: time.Duration(waitSec+15) * time.Second, Transport: &http.Transport{Proxy: nil}}
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/v1/approvals/%s/wait?timeout=%d", cfg.ServerURL, created.ID, waitSec), nil)
 	req.Header.Set("Authorization", "Bearer "+cfg.MacToken)
 	resp, err := longCli.Do(req)
 	if err != nil {

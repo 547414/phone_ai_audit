@@ -165,9 +165,19 @@ object AuditRepository {
     }
 
     fun onApprovalUpdated(item: ApprovalItem) {
-        _pendingApprovals.value = _pendingApprovals.value.filterNot { it.id == item.id }
+        val nextPending = _pendingApprovals.value.filterNot { it.id == item.id }
+        _pendingApprovals.value = nextPending
         val hist = _recentApprovals.value.filterNot { it.id == item.id }
         _recentApprovals.value = (listOf(item) + hist).take(40)
+        val now = System.currentTimeMillis()
+        val nextMessages = _messages.value.map { m ->
+            if (m.approvalId == item.id && m.readAt == 0L) m.copy(readAt = now) else m
+        }
+        _messages.value = nextMessages
+        _status.value = _status.value.copy(
+            pendingCount = nextPending.size,
+            unreadCount = nextMessages.count { it.readAt == 0L }
+        )
     }
 
     fun onMessageCreated(msg: AuditMessage) {

@@ -95,7 +95,12 @@ object AuditNotifier {
             .build()
     }
 
-    fun showApproval(context: Context, item: ApprovalItem, highRiskRequireApp: Boolean) {
+    fun showApproval(
+        context: Context,
+        item: ApprovalItem,
+        highRiskRequireApp: Boolean,
+        autoApproveOnTimeout: Boolean = true
+    ) {
         val notifId = approvalNotificationId(item.id)
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -107,6 +112,10 @@ object AuditNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val nowMs = System.currentTimeMillis()
+        val leftMs = if (item.expiresAt > nowMs) item.expiresAt - nowMs else 0L
+        val leftSec = if (leftMs > 0L) ((leftMs + 999L) / 1000L) else 0L
+
         val riskTag = if (item.isHighRisk) "【高危】" else ""
         val title = "$riskTag${agentDisplayName(item.agent)} 请求审批"
         val bigText = buildString {
@@ -115,6 +124,9 @@ object AuditNotifier {
             append(item.summary)
             if (item.riskReasons.isNotEmpty()) {
                 append("\n风险: ${item.riskReasons.joinToString("；")}")
+            }
+            if (autoApproveOnTimeout && leftSec > 0L) {
+                append("\n超时提示: ${leftSec}s 内未操作将自动允许")
             }
         }
 
@@ -129,6 +141,12 @@ object AuditNotifier {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(false)
             .setContentIntent(openPi)
+        if (autoApproveOnTimeout && leftSec > 0L) {
+            builder.setSubText("${leftSec}s 自动允许")
+        }
+        if (leftMs > 0L) {
+            builder.setTimeoutAfter(leftMs + 1500L)
+        }
 
         // Allow action: runs silently in background via BroadcastReceiver without opening the App UI
         if (!item.isHighRisk || !highRiskRequireApp) {

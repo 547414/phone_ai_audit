@@ -72,8 +72,8 @@ func main() {
 		return
 	}
 
-	// Approval flow
-	timeoutSec := 180
+	// Approval flow: pass 0 so Relay / daemon applies the synced default_timeout_sec setting.
+	timeoutSec := 0
 	decision, err := requestApprovalViaDaemon(ctx, cfg, parsed.Approval, timeoutSec)
 	if err != nil {
 		// Daemon might be down; try direct HTTPS create + wait fallback.
@@ -153,7 +153,11 @@ func requestApprovalViaDaemon(ctx context.Context, cfg config.Config, a proto.Ap
 		return proto.Approval{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := unixHTTPClient(cfg.SocketPath, time.Duration(timeoutSec+15)*time.Second).Do(req)
+	clientTimeout := 630 * time.Second
+	if timeoutSec > 0 {
+		clientTimeout = time.Duration(timeoutSec+15) * time.Second
+	}
+	resp, err := unixHTTPClient(cfg.SocketPath, clientTimeout).Do(req)
 	if err != nil {
 		return proto.Approval{}, err
 	}
@@ -206,13 +210,28 @@ func requestApprovalDirect(ctx context.Context, cfg config.Config, a proto.Appro
 		return created, nil
 	}
 
-	waitURL := fmt.Sprintf("%s/api/v1/approvals/%s/wait?timeout=%d", cfg.ServerURL, created.ID, timeoutSec)
+	waitSec := timeoutSec
+	if waitSec <= 0 {
+		if created.ExpiresAt > created.CreatedAt {
+			waitSec = int((created.ExpiresAt-created.CreatedAt+999)/1000) + 10
+		} else {
+			waitSec = 40
+		}
+	}
+	if waitSec < 15 {
+		waitSec = 15
+	}
+	if waitSec > 620 {
+		waitSec = 620
+	}
+
+	waitURL := fmt.Sprintf("%s/api/v1/approvals/%s/wait?timeout=%d", cfg.ServerURL, created.ID, waitSec)
 	wreq, err := http.NewRequestWithContext(ctx, http.MethodGet, waitURL, nil)
 	if err != nil {
 		return proto.Approval{}, err
 	}
 	wreq.Header.Set("Authorization", "Bearer "+cfg.MacToken)
-	wresp, err := directHTTPClient(time.Duration(timeoutSec+15) * time.Second).Do(wreq)
+	wresp, err := directHTTPClient(time.Duration(waitSec+15) * time.Second).Do(wreq)
 	if err != nil {
 		if ctx.Err() != nil {
 			cancelCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

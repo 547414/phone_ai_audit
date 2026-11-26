@@ -17,6 +17,7 @@ const (
 )
 
 const (
+	TimeoutApprove  = "approve"
 	TimeoutFallback = "fallback"
 	TimeoutDeny     = "deny"
 )
@@ -73,8 +74,8 @@ func DefaultSettings() Settings {
 	return Settings{
 		ApprovalMode:       ModeAuto,
 		IdleThresholdSec:   60,
-		DefaultTimeoutSec:  180,
-		TimeoutAction:      TimeoutFallback,
+		DefaultTimeoutSec:  30,
+		TimeoutAction:      TimeoutApprove,
 		TerminalEnabled:    true,
 		FilesEnabled:       true,
 		MacAwakeEnabled:    false,

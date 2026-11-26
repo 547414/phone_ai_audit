@@ -5,7 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +22,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -29,6 +34,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -40,8 +46,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
@@ -71,15 +79,19 @@ fun ControlScreen(
     var bioTerminal by remember { mutableStateOf(AuditRepository.config.biometricForTerminal) }
     var bioHighRisk by remember { mutableStateOf(AuditRepository.config.biometricForHighRisk) }
     var bioFiles by remember { mutableStateOf(AuditRepository.config.biometricForFiles) }
+    var customTimeoutText by remember(status.settings.defaultTimeoutSec) {
+        mutableStateOf(status.settings.defaultTimeoutSec.toString())
+    }
 
     val notifEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val batteryIgnored = pm.isIgnoringBatteryOptimizations(context.packageName)
 
-    fun patchRemote(key: String, value: Any) {
+    fun patchRemote(key: String, value: Any, successMsg: String? = null) {
         scope.launch {
             val res = AuditRepository.updateSettings(JSONObject().put(key, value))
-            res.onFailure { onShowSnack("同步设置失败: ${it.message}") }
+            res.onSuccess { if (!successMsg.isNullOrBlank()) onShowSnack(successMsg) }
+                .onFailure { onShowSnack("同步设置失败: ${it.message}") }
         }
     }
 
@@ -188,6 +200,114 @@ fun ControlScreen(
                             selectedKey = status.settings.approvalMode,
                             onSelect = { patchRemote("approval_mode", it) }
                         )
+                    }
+                }
+            }
+
+            // 3.5 Approval Timeout & Auto-Approve Settings (synced to Mac & Phone)
+            item {
+                val curSec = status.settings.defaultTimeoutSec
+                val autoApprove = status.settings.timeoutAction == "approve"
+                val timeoutFooter = if (autoApprove) {
+                    "当前设置：弹窗超过 $curSec 秒未手动操作将自动确认允许，Mac 浮窗与手机通知同时消除并标为已读。"
+                } else {
+                    "当前设置：弹窗超过 $curSec 秒未手动操作不会自动允许，将自动退回电脑终端处理。"
+                }
+                val timeoutFieldColors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = p.accent,
+                    unfocusedBorderColor = p.separator,
+                    focusedTextColor = p.label,
+                    unfocusedTextColor = p.label,
+                    focusedLabelColor = p.accent,
+                    unfocusedLabelColor = p.secondaryLabel
+                )
+                IosSection(title = "审批超时设置（Mac / 手机同步生效）", footer = timeoutFooter) {
+                    IosSwitchRow(
+                        title = "超时自动确认授权",
+                        subtitle = "默认开启；超时自动允许，并同步消除电脑和手机弹窗、标为已读",
+                        checked = autoApprove
+                    ) { enabled ->
+                        patchRemote(
+                            "timeout_action",
+                            if (enabled) "approve" else "fallback",
+                            if (enabled) "已开启超时自动确认授权" else "已关闭超时自动确认授权"
+                        )
+                    }
+                    IosDivider()
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("授权弹窗超时时长", color = p.label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                "当前 ${curSec} 秒",
+                                color = p.accent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(15, 30, 60, 120, 180, 300).forEach { sec ->
+                                val selected = curSec == sec
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (selected) p.accent else p.secondaryFill,
+                                    border = if (selected) null else BorderStroke(0.5.dp, p.separator.copy(alpha = 0.6f)),
+                                    modifier = Modifier.clickable {
+                                        customTimeoutText = sec.toString()
+                                        patchRemote("default_timeout_sec", sec, "超时时长已同步为 ${sec} 秒")
+                                    }
+                                ) {
+                                    Text(
+                                        text = "${sec}秒",
+                                        color = if (selected) Color.White else p.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = customTimeoutText,
+                                onValueChange = { input ->
+                                    customTimeoutText = input.filter { it.isDigit() }.take(3)
+                                },
+                                label = { Text("自定义秒数 (5-600)", fontSize = 12.sp) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = timeoutFieldColors,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IosButton(
+                                text = "应用",
+                                onClick = {
+                                    val sec = customTimeoutText.trim().toIntOrNull()
+                                    if (sec == null || sec !in 5..600) {
+                                        onShowSnack("请输入 5 到 600 之间的整数秒")
+                                    } else {
+                                        patchRemote("default_timeout_sec", sec, "超时时长已同步为 ${sec} 秒")
+                                    }
+                                },
+                                modifier = Modifier.width(84.dp)
+                            )
+                        }
                     }
                 }
             }
