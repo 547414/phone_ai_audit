@@ -60,8 +60,8 @@ android {
         applicationId = configuredAppId
         minSdk = 29
         targetSdk = 35
-        versionCode = 22
-        versionName = "2.7.4"
+        versionCode = 23
+        versionName = "2.7.5"
 
         buildConfigField(
             "String",

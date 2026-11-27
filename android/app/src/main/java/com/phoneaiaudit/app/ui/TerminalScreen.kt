@@ -121,6 +121,7 @@ fun TerminalScreen(
     val status by AuditRepository.status.collectAsState()
     val sessions by AuditRepository.tmuxSessions.collectAsState()
     val agyProfiles by AuditRepository.agyProfiles.collectAsState()
+    val agyMultiAccountEnabled by AuditRepository.agyMultiAccountTerminalEnabled.collectAsState()
     val pendingLaunch by AuditRepository.pendingTerminalLaunch.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -182,7 +183,7 @@ fun TerminalScreen(
     }
 
     fun refreshAgyAccounts(silent: Boolean = true) {
-        if (!status.macOnline) return
+        if (!status.macOnline || !agyMultiAccountEnabled) return
         scope.launch {
             agyProfilesLoading = true
             AuditRepository.fetchAgyProfiles()
@@ -208,6 +209,10 @@ fun TerminalScreen(
     fun startTerminal(req: TerminalLaunchRequest) {
         if (!status.settings.terminalEnabled) {
             onShowSnack("远程终端已在控制面板中关闭")
+            return
+        }
+        if (req.mode == "new_agy" && !AuditRepository.agyMultiAccountTerminalEnabled.value) {
+            onShowSnack("agy 多账号开终端已在控制设置中关闭")
             return
         }
         if (!status.macOnline) {
@@ -261,7 +266,7 @@ fun TerminalScreen(
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         scope.launch {
             AuditRepository.refreshTmuxSessions()
-            if (status.macOnline) {
+            if (status.macOnline && agyMultiAccountEnabled) {
                 AuditRepository.fetchAgyProfiles()
             }
         }
@@ -269,8 +274,14 @@ fun TerminalScreen(
 
     LaunchedEffect(Unit) {
         AuditRepository.refreshTmuxSessions()
-        if (status.macOnline) {
+    }
+
+    LaunchedEffect(agyMultiAccountEnabled, status.macOnline) {
+        if (agyMultiAccountEnabled && status.macOnline) {
             refreshAgyAccounts(silent = true)
+        } else if (!agyMultiAccountEnabled) {
+            showNewTerminalSheet = false
+            expiredConfirmTarget = null
         }
     }
 
@@ -411,7 +422,7 @@ fun TerminalScreen(
         )
     }
 
-    if (showNewTerminalSheet && activeRequest == null) {
+    if (showNewTerminalSheet && agyMultiAccountEnabled && activeRequest == null) {
         NewTerminalSheet(
             profiles = agyProfiles,
             loading = agyProfilesLoading,
@@ -473,7 +484,7 @@ fun TerminalScreen(
                             AuditRepository.refreshTmuxSessions()
                                 .onSuccess { list -> onShowSnack("刷新成功 · 共 ${list.size} 个终端") }
                                 .onFailure { onShowSnack("刷新失败: ${it.message}") }
-                            if (status.macOnline) {
+                            if (status.macOnline && agyMultiAccountEnabled) {
                                 refreshAgyAccounts(silent = true)
                             }
                         }
@@ -490,12 +501,21 @@ fun TerminalScreen(
             ) {
                 item {
                     IosButton(
-                        text = "新建 Mac 终端（可选 agy 账号 / Shell）",
+                        text = if (agyMultiAccountEnabled) {
+                            "新建 Mac 终端（可选 agy 账号 / Shell）"
+                        } else {
+                            "新建 Mac 终端（电脑端同步弹窗）"
+                        },
                         icon = Icons.Default.Add,
                         enabled = status.macOnline && status.settings.terminalEnabled,
                         onClick = {
-                            showNewTerminalSheet = true
-                            refreshAgyAccounts(silent = true)
+                            if (agyMultiAccountEnabled) {
+                                showNewTerminalSheet = true
+                                refreshAgyAccounts(silent = true)
+                            } else {
+                                val newName = "phone-" + java.util.UUID.randomUUID().toString().replace("-", "").take(6)
+                                startTerminal(TerminalLaunchRequest("new_shell", newName))
+                            }
                         },
                         modifier = Modifier.fillMaxWidth()
                     )

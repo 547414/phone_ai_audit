@@ -977,7 +977,9 @@ func (m *Manager) Open(query string, opts OpenOptions) (*Profile, string, error)
 	if !existed {
 		shellCmd := buildAgyShellCommand(agyBin, opts.AgyArgs)
 		args := tmuxBaseArgs()
-		args = append(args, "new-session", "-d", "-s", sessName, "-c", cwd, "--", "/bin/zsh", "-lc", shellCmd)
+		args = append(args, "new-session", "-d", "-s", sessName, "-c", cwd)
+		args = append(args, tmuxColorEnvArgs()...)
+		args = append(args, "--", "/bin/zsh", "-lc", shellCmd)
 		cmd := exec.Command(tmuxBin, args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return prof, "", fmt.Errorf("创建 tmux 会话 %s 失败: %w (%s)", sessName, err, strings.TrimSpace(string(out)))
@@ -1056,7 +1058,9 @@ func (m *Manager) LoginNew(alias, cwd string, force bool, customTTLMs *int64, wa
 		sessName = pickSessionName(tmuxBin, name, cwd, false)
 		shellCmd := buildAgyShellCommand(agyBin, nil)
 		args := tmuxBaseArgs()
-		args = append(args, "new-session", "-d", "-s", sessName, "-c", cwd, "--", "/bin/zsh", "-lc", shellCmd)
+		args = append(args, "new-session", "-d", "-s", sessName, "-c", cwd)
+		args = append(args, tmuxColorEnvArgs()...)
+		args = append(args, "--", "/bin/zsh", "-lc", shellCmd)
 		if out, err := exec.Command(tmuxBin, args...).CombinedOutput(); err != nil {
 			return nil, "", fmt.Errorf("创建登录终端失败: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
@@ -1115,7 +1119,7 @@ func buildAgyShellCommand(agyBin string, extraArgs []string) string {
 	}
 	proxySetup := buildProxyShellExports(callerProxy, fbHTTP, fbHTTPS, fbAll)
 	return fmt.Sprintf(
-		`export TERM=xterm-256color; %s; %s; __rc=$?; if [[ $__rc -ne 0 && $__rc -ne 130 ]]; then echo ""; echo "[agy 异常退出 (code=$__rc)，可查看上方报错后输入 exit 关闭]"; exec /bin/zsh -l; fi`,
+		`export TERM=xterm-256color COLORTERM="${COLORTERM:-truecolor}" TERM_PROGRAM="${TERM_PROGRAM:-Apple_Terminal}"; %s; %s; __rc=$?; if [[ $__rc -ne 0 && $__rc -ne 130 ]]; then echo ""; echo "[agy 异常退出 (code=$__rc)，可查看上方报错后输入 exit 关闭]"; exec /bin/zsh -l; fi`,
 		proxySetup, strings.Join(parts, " "),
 	)
 }
@@ -1145,7 +1149,7 @@ func buildAgyEnvBanner(alias, email string, switched, activePresent bool) string
 // (PATH, account markers, proxy variables, status banner) and drops into an interactive login zsh
 // WITHOUT directly launching `agy`.
 func buildAgyEnvShellCommand(agyBin, alias, email string, switched, activePresent bool) string {
-	stmts := []string{`export TERM=xterm-256color`}
+	stmts := []string{`export TERM=xterm-256color COLORTERM="${COLORTERM:-truecolor}" TERM_PROGRAM="${TERM_PROGRAM:-Apple_Terminal}"`}
 
 	if agyBin != "" {
 		if agyDir := strings.TrimSpace(filepath.Dir(agyBin)); agyDir != "" && agyDir != "." {
@@ -1196,12 +1200,24 @@ func openDirectTerminalWindow(agyBin, cwd string, extraArgs []string) error {
 	}
 	proxySetup := buildProxyShellExports(callerProxy, fbHTTP, fbHTTPS, fbAll)
 	scriptPath := filepath.Join(os.TempDir(), fmt.Sprintf("ai-audit-agy-%d.command", time.Now().UnixNano()))
-	content := fmt.Sprintf("#!/bin/zsh\nrm -f %s\ncd %s || exit 1\nexport TERM=xterm-256color\n%s\nexec %s\n",
+	content := fmt.Sprintf("#!/bin/zsh\nrm -f %s\ncd %s || exit 1\nexport TERM=xterm-256color\nexport COLORTERM=\"${COLORTERM:-truecolor}\"\nexport TERM_PROGRAM=\"${TERM_PROGRAM:-Apple_Terminal}\"\n%s\nexec %s\n",
 		shellQuote(scriptPath), shellQuote(cwd), proxySetup, strings.Join(parts, " "))
 	if err := os.WriteFile(scriptPath, []byte(content), 0o700); err != nil {
 		return err
 	}
 	return exec.Command("/usr/bin/open", "-a", "Terminal", scriptPath).Run()
+}
+
+func tmuxColorEnvArgs() []string {
+	colorTerm := strings.TrimSpace(os.Getenv("COLORTERM"))
+	if colorTerm == "" {
+		colorTerm = "truecolor"
+	}
+	termProg := strings.TrimSpace(os.Getenv("TERM_PROGRAM"))
+	if termProg == "" {
+		termProg = "Apple_Terminal"
+	}
+	return []string{"-e", "COLORTERM=" + colorTerm, "-e", "TERM_PROGRAM=" + termProg}
 }
 
 func tmuxBaseArgs() []string {

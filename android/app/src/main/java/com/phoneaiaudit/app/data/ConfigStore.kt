@@ -28,6 +28,10 @@ class ConfigStore(context: Context) {
         get() = prefs.getBoolean("biometric_files", false)
         set(value) = prefs.edit().putBoolean("biometric_files", value).apply()
 
+    var agyMultiAccountTerminalEnabled: Boolean
+        get() = prefs.getBoolean("agy_multi_account_terminal", false)
+        set(value) = prefs.edit().putBoolean("agy_multi_account_terminal", value).apply()
+
     var terminalFontSize: Int
         get() = prefs.getInt("terminal_font_size", 12)
         set(value) = prefs.edit().putInt("terminal_font_size", value.coerceIn(9, 22)).apply()

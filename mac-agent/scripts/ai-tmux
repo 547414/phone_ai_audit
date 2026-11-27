@@ -50,6 +50,11 @@ run_tmux_attached() {
   trap - HUP TERM
 }
 
+term_color="${COLORTERM:-truecolor}"
+term_prog="${TERM_PROGRAM:-Apple_Terminal}"
+export COLORTERM="$term_color"
+export TERM_PROGRAM="$term_prog"
+
 dir_name="$(sanitize "$(basename "$PWD")")"
 [[ -z "$dir_name" ]] && dir_name="home"
 
@@ -58,7 +63,7 @@ if [[ $# -eq 0 ]]; then
   if [[ -n "${TMUX:-}" ]]; then
     exec zsh -l
   fi
-  run_tmux_attached "$sess" new-session -A -s "$sess" -c "$PWD"
+  run_tmux_attached "$sess" new-session -A -s "$sess" -c "$PWD" -e "COLORTERM=${term_color}" -e "TERM_PROGRAM=${term_prog}"
   exit 0
 fi
 
@@ -87,4 +92,6 @@ done
 
 cmd_str="$(printf '%q ' "$tool" "$@")"
 tool_q="$(printf '%q' "$tool")"
-run_tmux_attached "$sess" new-session -s "$sess" -c "$PWD" -- /bin/zsh -lc "export TERM=xterm-256color; [[ -f \"\$HOME/.zshrc\" ]] && source \"\$HOME/.zshrc\" >/dev/null 2>&1 || true; ${proxy_exports}${cmd_str}; __rc=\$?; if [[ \$__rc -ne 0 && \$__rc -ne 130 ]]; then echo \"\"; echo \"[${tool_q} 异常退出 (code=\$__rc)，可查看上方报错后输入 exit 关闭]\"; exec /bin/zsh -l; fi"
+color_q="$(printf '%q' "$term_color")"
+prog_q="$(printf '%q' "$term_prog")"
+run_tmux_attached "$sess" new-session -s "$sess" -c "$PWD" -e "COLORTERM=${term_color}" -e "TERM_PROGRAM=${term_prog}" -- /bin/zsh -lc "export TERM=xterm-256color COLORTERM=${color_q} TERM_PROGRAM=${prog_q}; [[ -f \"\$HOME/.zshrc\" ]] && source \"\$HOME/.zshrc\" >/dev/null 2>&1 || true; ${proxy_exports}${cmd_str}; __rc=\$?; if [[ \$__rc -ne 0 && \$__rc -ne 130 ]]; then echo \"\"; echo \"[${tool_q} 异常退出 (code=\$__rc)，可查看上方报错后输入 exit 关闭]\"; exec /bin/zsh -l; fi"

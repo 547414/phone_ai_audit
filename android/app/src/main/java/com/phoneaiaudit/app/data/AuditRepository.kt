@@ -66,6 +66,9 @@ object AuditRepository {
     private val _themeMode = MutableStateFlow("system")
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
+    private val _agyMultiAccountTerminalEnabled = MutableStateFlow(false)
+    val agyMultiAccountTerminalEnabled: StateFlow<Boolean> = _agyMultiAccountTerminalEnabled.asStateFlow()
+
     private val _isTerminalActive = MutableStateFlow(false)
     val isTerminalActive: StateFlow<Boolean> = _isTerminalActive.asStateFlow()
 
@@ -111,10 +114,18 @@ object AuditRepository {
         _themeMode.value = mode
     }
 
+    fun setAgyMultiAccountTerminalEnabled(enabled: Boolean) {
+        if (::config.isInitialized) {
+            config.agyMultiAccountTerminalEnabled = enabled
+        }
+        _agyMultiAccountTerminalEnabled.value = enabled
+    }
+
     fun init(context: Context) {
         if (!::config.isInitialized) {
             config = ConfigStore(context)
             _themeMode.value = config.themeMode
+            _agyMultiAccountTerminalEnabled.value = config.agyMultiAccountTerminalEnabled
         }
     }
 

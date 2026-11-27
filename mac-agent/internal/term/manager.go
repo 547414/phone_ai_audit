@@ -116,14 +116,26 @@ func enrichedEnv() []string {
 		"/sbin",
 	}, ":")
 	env := os.Environ()
-	out := make([]string, 0, len(env)+4)
+	out := make([]string, 0, len(env)+6)
 	hasPath := false
+	hasColorTerm := false
+	hasTermProgram := false
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "PATH=") {
 			out = append(out, "PATH="+extraPath+":"+strings.TrimPrefix(kv, "PATH="))
 			hasPath = true
 		} else if strings.HasPrefix(kv, "TERM=") || strings.HasPrefix(kv, "TMUX=") {
 			continue
+		} else if strings.HasPrefix(kv, "COLORTERM=") {
+			if strings.TrimSpace(strings.TrimPrefix(kv, "COLORTERM=")) != "" {
+				out = append(out, kv)
+				hasColorTerm = true
+			}
+		} else if strings.HasPrefix(kv, "TERM_PROGRAM=") {
+			if strings.TrimSpace(strings.TrimPrefix(kv, "TERM_PROGRAM=")) != "" {
+				out = append(out, kv)
+				hasTermProgram = true
+			}
 		} else {
 			out = append(out, kv)
 		}
@@ -132,6 +144,12 @@ func enrichedEnv() []string {
 		out = append(out, "PATH="+extraPath)
 	}
 	out = append(out, "TERM=xterm-256color", "LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8")
+	if !hasColorTerm {
+		out = append(out, "COLORTERM=truecolor")
+	}
+	if !hasTermProgram {
+		out = append(out, "TERM_PROGRAM=Apple_Terminal")
+	}
 	return out
 }
 
@@ -591,7 +609,11 @@ func (m *Manager) OpenWithOptions(req OpenRequest) (OpenResult, error) {
 			if sock := findTmuxSocket(); sock != "" {
 				args = append(args, "-S", sock)
 			}
-			args = append(args, "new-session", "-A", "-s", sessName, "-c", cwd)
+			args = append(args,
+				"new-session", "-A", "-s", sessName, "-c", cwd,
+				"-e", "COLORTERM=truecolor",
+				"-e", "TERM_PROGRAM=Apple_Terminal",
+			)
 			if strings.TrimSpace(req.ShellCommand) != "" {
 				args = append(args, "--", "/bin/zsh", "-lc", req.ShellCommand)
 			}
@@ -881,6 +903,8 @@ func OpenMacTerminalWindow(tmuxBin, sessName string) error {
 	scriptPath := filepath.Join(os.TempDir(), fmt.Sprintf("ai-audit-open-%s.command", sessName))
 	content := fmt.Sprintf(`#!/bin/zsh
 export TERM=xterm-256color
+export COLORTERM="${COLORTERM:-truecolor}"
+export TERM_PROGRAM="${TERM_PROGRAM:-Apple_Terminal}"
 CUR_TTY="$(tty 2>/dev/null || true)"
 rm -f %q
 

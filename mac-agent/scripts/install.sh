@@ -228,6 +228,10 @@ cat > "$PLIST_PATH" <<EOF
     <string>${BIN_DIR}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key>
     <string>${HOME}</string>
+    <key>COLORTERM</key>
+    <string>truecolor</string>
+    <key>TERM_PROGRAM</key>
+    <string>Apple_Terminal</string>
     <key>AI_AUDIT_CONFIG</key>
     <string>${MAC_CFG}</string>
     <key>AI_AUDIT_WEB_ADDR</key>

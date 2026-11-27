@@ -73,6 +73,7 @@ fun ControlScreen(
     val lastError by AuditRepository.lastError.collectAsState()
     val cfgVer by AuditRepository.configVersion.collectAsState()
     val themeMode by AuditRepository.themeMode.collectAsState()
+    val agyMultiAccountEnabled by AuditRepository.agyMultiAccountTerminalEnabled.collectAsState()
 
     var serverUrl by remember(cfgVer) { mutableStateOf(AuditRepository.config.serverUrl) }
     var appToken by remember(cfgVer) { mutableStateOf(AuditRepository.config.appToken) }
@@ -319,6 +320,18 @@ fun ControlScreen(
                         subtitle = "关闭后拒绝所有远程 Shell 连接",
                         checked = status.settings.terminalEnabled
                     ) { patchRemote("terminal_enabled", it) }
+                    IosDivider()
+                    IosSwitchRow(
+                        title = "agy 多账号开终端",
+                        subtitle = "默认关闭；开启后新建终端可选择 Antigravity (agy) 账号加载环境，关闭时直接新建普通 Shell",
+                        checked = agyMultiAccountEnabled
+                    ) { enabled ->
+                        AuditRepository.setAgyMultiAccountTerminalEnabled(enabled)
+                        onShowSnack(
+                            if (enabled) "已开启 agy 多账号开终端"
+                            else "已关闭 agy 多账号开终端"
+                        )
+                    }
                     IosDivider()
                     IosSwitchRow(
                         title = "允许远程查看/编辑 Mac 文件",

@@ -519,7 +519,9 @@ func TestRemoteSnapshotAndPrepareLaunch(t *testing.T) {
 	if plan.Cwd != projectDir {
 		t.Fatalf("expected cwd %s, got %s", projectDir, plan.Cwd)
 	}
-	if !strings.Contains(plan.ShellCommand, "export AI_AUDIT_AGY_ACCOUNT='alice'") ||
+	if !strings.Contains(plan.ShellCommand, `COLORTERM="${COLORTERM:-truecolor}"`) ||
+		!strings.Contains(plan.ShellCommand, `TERM_PROGRAM="${TERM_PROGRAM:-Apple_Terminal}"`) ||
+		!strings.Contains(plan.ShellCommand, "export AI_AUDIT_AGY_ACCOUNT='alice'") ||
 		!strings.Contains(plan.ShellCommand, "export AI_AUDIT_AGY_EMAIL='alice@example.com'") ||
 		!strings.HasSuffix(plan.ShellCommand, "exec /bin/zsh -l") {
 		t.Fatalf("expected env-only interactive zsh bootstrap command, got: %s", plan.ShellCommand)
