@@ -494,25 +494,16 @@ func (d *Daemon) handleTermOpen(streamID, mode, target, agyAccount, cwd string, 
 	}
 
 	res, err := d.termMgr.OpenWithOptions(openReq)
+	if releaseAgyLock != nil {
+		releaseAgyLock()
+	}
 	if err != nil {
-		if releaseAgyLock != nil {
-			releaseAgyLock()
-		}
 		d.sendJSON(map[string]any{
 			"type":      "term.error",
 			"stream_id": streamID,
 			"error":     err.Error(),
 		})
 		return
-	}
-
-	if releaseAgyLock != nil {
-		// Hold the agyauth lock briefly in background so agy finishes reading the global Keychain slot
-		// without blocking live terminal output to the phone.
-		go func() {
-			time.Sleep(1500 * time.Millisecond)
-			releaseAgyLock()
-		}()
 	}
 
 	opened := map[string]any{

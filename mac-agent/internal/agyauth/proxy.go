@@ -93,15 +93,19 @@ func normalizeProxyURL(p string) string {
 	return p
 }
 
-// buildProxyShellExports generates zsh statements that:
-//  1. Source ~/.zshrc (because `zsh -lc` is non-interactive and otherwise skips ~/.zshrc proxy exports),
-//  2. Explicitly re-apply any proxy env vars already set in the caller shell (overriding stale tmux server env),
-//  3. Fall back to config.json / macOS system proxy only if ~/.zshrc and caller shell left proxy vars unset.
-func buildProxyShellExports(callerEnv map[string]string, fbHTTP, fbHTTPS, fbAll string) string {
-	var stmts []string
-	// Load user's interactive zsh settings (~/.zshrc) where PATH and proxy exports commonly live.
-	stmts = append(stmts, `[[ -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc" >/dev/null 2>&1 || true`)
+func hasActiveProxyEnv(env map[string]string) bool {
+	for _, k := range proxyEnvKeys {
+		if k == "NO_PROXY" || k == "no_proxy" {
+			continue
+		}
+		if strings.TrimSpace(env[k]) != "" {
+			return true
+		}
+	}
+	return false
+}
 
+func appendProxyExportStmts(stmts []string, callerEnv map[string]string, fbHTTP, fbHTTPS, fbAll string) []string {
 	// Forward caller shell proxy env vars verbatim (in deterministic order).
 	hasCallerProxy := false
 	for _, k := range proxyEnvKeys {
@@ -114,7 +118,7 @@ func buildProxyShellExports(callerEnv map[string]string, fbHTTP, fbHTTPS, fbAll 
 	}
 
 	// If caller shell didn't explicitly set a proxy, fall back to config.json or macOS system proxy
-	// ONLY when ~/.zshrc also didn't configure any proxy variable.
+	// ONLY when proxy variables are still unset.
 	if !hasCallerProxy && (fbHTTP != "" || fbHTTPS != "" || fbAll != "") {
 		var fbLines []string
 		if fbHTTP != "" {
@@ -131,5 +135,25 @@ func buildProxyShellExports(callerEnv map[string]string, fbHTTP, fbHTTPS, fbAll 
 			strings.Join(fbLines, "; "),
 		))
 	}
+	return stmts
+}
+
+// buildProxyShellExports generates zsh statements that:
+//  1. Source ~/.zshrc (because `zsh -lc` is non-interactive and otherwise skips ~/.zshrc proxy exports),
+//  2. Explicitly re-apply any proxy env vars already set in the caller shell (overriding stale tmux server env),
+//  3. Fall back to config.json / macOS system proxy only if ~/.zshrc and caller shell left proxy vars unset.
+func buildProxyShellExports(callerEnv map[string]string, fbHTTP, fbHTTPS, fbAll string) string {
+	stmts := []string{
+		// Load user's interactive zsh settings (~/.zshrc) where PATH and proxy exports commonly live.
+		`[[ -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc" >/dev/null 2>&1 || true`,
+	}
+	stmts = appendProxyExportStmts(stmts, callerEnv, fbHTTP, fbHTTPS, fbAll)
+	return strings.Join(stmts, "; ")
+}
+
+// buildInteractiveProxyShellExports prepares proxy env vars right before `exec /bin/zsh -l`.
+// It intentionally skips pre-sourcing ~/.zshrc because the interactive login shell will load ~/.zshrc once.
+func buildInteractiveProxyShellExports(callerEnv map[string]string, fbHTTP, fbHTTPS, fbAll string) string {
+	stmts := appendProxyExportStmts(nil, callerEnv, fbHTTP, fbHTTPS, fbAll)
 	return strings.Join(stmts, "; ")
 }

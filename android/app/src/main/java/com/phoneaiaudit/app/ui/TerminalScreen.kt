@@ -230,9 +230,9 @@ fun TerminalScreen(
         if (AuditRepository.config.biometricForTerminal) {
             val bioSubtitle = when {
                 req.mode == "new_agy" && req.agyAccount.isNotBlank() ->
-                    "新建 Antigravity 终端（账号: ${req.agyAccount}）"
+                    "新建终端并加载 agy 账号环境（${req.agyAccount}）"
                 req.mode == "new_agy" ->
-                    "新建 Antigravity 终端（当前默认账号）"
+                    "新建终端并加载当前 agy 账号环境"
                 req.target.isNotBlank() ->
                     "连接 tmux: ${req.target}"
                 else ->
@@ -1723,7 +1723,7 @@ private fun NewTerminalSheet(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "选择要加载的 Antigravity 账号或普通 Shell，电脑端将同步弹窗",
+                        text = "选择 agy 账号仅加载账号环境（不自动启动 agy），或新建普通 Shell",
                         color = p.secondaryLabel,
                         fontSize = 12.sp
                     )
@@ -1839,17 +1839,17 @@ private fun NewTerminalSheet(
             val savedList = profiles?.profiles.orEmpty()
             val agyFooter = when {
                 profiles == null && errorMsg != null ->
-                    "读取 Mac 账号列表失败（$errorMsg）；请确认中转服务与 Mac 守护进程均已更新，或直接启动当前默认 agy。"
+                    "读取 Mac 账号列表失败（$errorMsg）；请确认中转服务与 Mac 守护进程均已更新，或直接加载当前默认 agy 环境。"
                 profiles != null && !profiles.agyInstalled ->
                     "请在 Mac 安装 Antigravity CLI（agy）后重试。"
                 savedList.isEmpty() ->
-                    "在 Mac 终端运行 ai-audit agy save <别名> 或 ai-audit agy login <别名> 保存多账号后，即可在此一键选号启动。"
+                    "在 Mac 终端运行 ai-audit agy save <别名> 或 ai-audit agy login <别名> 保存多账号后，即可在此一键加载对应账号环境。"
                 else ->
-                    "选择账号将自动切换 Mac Keychain 全局槽位并加载对应 agy（不影响已运行的其他终端）。"
+                    "选择账号将自动切换 Mac Keychain 全局槽位并加载对应账号环境，进入 Shell 后按需手动运行 agy（不影响已运行的其他终端）。"
             }
 
             IosSection(
-                title = if (savedList.isNotEmpty()) "加载 Antigravity · 选择 agy 账号 (${savedList.size})" else "加载 Antigravity (agy)",
+                title = if (savedList.isNotEmpty()) "加载 agy 账号环境 · 选择账号 (${savedList.size})" else "加载 agy 账号环境",
                 footer = agyFooter
             ) {
                 when {
@@ -1867,8 +1867,8 @@ private fun NewTerminalSheet(
                     profiles == null -> {
                         // Fallback when profile list couldn't be fetched yet
                         AgyDefaultActionRow(
-                            title = "启动当前默认 Antigravity (agy)",
-                            subtitle = "不切换钥匙串，直接使用 Mac 当前登录态加载 agy",
+                            title = "加载当前默认 agy 环境",
+                            subtitle = "不切换钥匙串，保留 Mac 当前登录态并加载环境进入 Shell",
                             badgeText = null,
                             badgeColor = agyBlue,
                             onClick = { onSelectDefaultAgy(effectiveCwd) }
@@ -1898,17 +1898,17 @@ private fun NewTerminalSheet(
 
                         if (savedList.isEmpty() || profiles.activeUnsaved) {
                             val title = if (profiles.activeUnsaved) {
-                                "当前活跃 agy"
+                                "当前活跃 agy 环境"
                             } else {
-                                "启动默认 Antigravity (agy)"
+                                "加载默认 agy 环境"
                             }
                             val sub = when {
                                 profiles.activeEmail.isNotBlank() ->
-                                    "当前登录：${profiles.activeEmail}（直接加载，不切换账号）"
+                                    "当前登录：${profiles.activeEmail}（加载账号环境，不切换钥匙串、不自动启动 agy）"
                                 profiles.activePresent ->
-                                    "使用 Mac 当前 Keychain 登录态直接加载 agy"
+                                    "保留 Mac 当前 Keychain 登录态并加载环境进入 Shell"
                                 else ->
-                                    "启动 agy（未检测到已登录凭据，可在终端内完成登录）"
+                                    "加载 agy 终端环境（未检测到已登录凭据，进入后可手动运行 agy 登录）"
                             }
                             AgyDefaultActionRow(
                                 title = title,
@@ -1954,7 +1954,7 @@ private fun NewTerminalSheet(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "新建空白交互终端，不自动启动 AI",
+                                text = "新建空白交互终端，不切换 agy 账号",
                                 color = p.secondaryLabel,
                                 fontSize = 12.sp
                             )
@@ -2079,7 +2079,7 @@ private fun AgyAccountPickerRow(
         }
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = "选择并启动",
+            contentDescription = "选择并加载环境",
             tint = p.tertiaryLabel,
             modifier = Modifier.size(20.dp)
         )
@@ -2134,7 +2134,7 @@ private fun AgyDefaultActionRow(
         }
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = "启动",
+            contentDescription = "加载环境",
             tint = p.tertiaryLabel,
             modifier = Modifier.size(20.dp)
         )

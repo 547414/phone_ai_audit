@@ -667,14 +667,10 @@ func (m *Manager) SnapshotForRemote(defaultCwd string, suggestedCwds []string) (
 }
 
 // PrepareRemoteLaunch switches the global Keychain slot (when accountQuery != "") under the agyauth flock
-// and returns the tmux session name, resolved cwd, shell command, and unlock callback.
-// The caller MUST invoke unlock() (after launching the PTY and waiting briefly for agy to read Keychain).
+// and returns the tmux session name, resolved cwd, and an interactive shell bootstrap command that loads
+// the account & proxy environment without directly launching `agy`.
+// The caller MUST invoke unlock() after the terminal session is created.
 func (m *Manager) PrepareRemoteLaunch(accountQuery, cwd, requestedTarget string) (*RemoteLaunchPlan, func(), error) {
-	agyBin := FindAgyBinary()
-	if agyBin == "" {
-		return nil, nil, errors.New("Mac 未找到 agy 命令，请先安装 Antigravity CLI")
-	}
-
 	resolvedCwd, err := resolveLaunchCwd(cwd)
 	if err != nil {
 		return nil, nil, err
@@ -687,6 +683,9 @@ func (m *Manager) PrepareRemoteLaunch(accountQuery, cwd, requestedTarget string)
 
 	var prof *Profile
 	alias := "default"
+	email := ""
+	switched := false
+	activePresent := false
 	query := strings.TrimSpace(accountQuery)
 	if query != "" {
 		p, serr := m.switchLocked(query)
@@ -696,20 +695,33 @@ func (m *Manager) PrepareRemoteLaunch(accountQuery, cwd, requestedTarget string)
 		}
 		prof = p
 		alias = p.Name
+		email = p.Email
+		switched = true
+		activePresent = true
 	} else {
-		// Keep the currently active Keychain login untouched, but derive a friendly alias if it matches a saved profile.
-		if pf, lerr := m.loadProfilesLocked(); lerr == nil {
-			if active, aerr := m.readActiveSlot(); aerr == nil && active != nil && active.Present {
+		// Keep the currently active Keychain login untouched, but derive a friendly alias/email if available.
+		if active, aerr := m.readActiveSlot(); aerr == nil && active != nil && active.Present {
+			activePresent = true
+			email = active.EmailHint
+			if pf, lerr := m.loadProfilesLocked(); lerr == nil {
 				for _, p := range pf.Profiles {
 					if active.Fingerprint == p.Fingerprint ||
 						(active.EmailHint != "" && p.Email != "" && strings.EqualFold(active.EmailHint, p.Email)) {
 						cp := *p
 						prof = &cp
 						alias = p.Name
+						if p.Email != "" {
+							email = p.Email
+						}
 						break
 					}
 				}
 			}
+		}
+	}
+	if email == "" && prof != nil {
+		if aq := matchQuotaAccount(m.loadAgyQuotas(), prof.Email, prof.Name); aq != nil && aq.Email != "" {
+			email = aq.Email
 		}
 	}
 
@@ -722,10 +734,11 @@ func (m *Manager) PrepareRemoteLaunch(accountQuery, cwd, requestedTarget string)
 		}
 	}
 
-	shellCmd := buildAgyShellCommand(agyBin, nil)
-	notifyLabel := "agy: " + alias
+	agyBin := FindAgyBinary()
+	shellCmd := buildAgyEnvShellCommand(agyBin, alias, email, switched, activePresent)
+	notifyLabel := "agy 环境: " + alias
 	if sessName != "" {
-		notifyLabel = fmt.Sprintf("agy (%s): %s", alias, sessName)
+		notifyLabel = fmt.Sprintf("agy 环境 (%s): %s", alias, sessName)
 	}
 
 	return &RemoteLaunchPlan{
@@ -1097,7 +1110,7 @@ func buildAgyShellCommand(agyBin string, extraArgs []string) string {
 	}
 	callerProxy := collectCallerProxyEnv(os.Getenv)
 	fbHTTP, fbHTTPS, fbAll := "", "", ""
-	if len(callerProxy) == 0 {
+	if !hasActiveProxyEnv(callerProxy) {
 		fbHTTP, fbHTTPS, fbAll = detectFallbackProxy()
 	}
 	proxySetup := buildProxyShellExports(callerProxy, fbHTTP, fbHTTPS, fbAll)
@@ -1105,6 +1118,60 @@ func buildAgyShellCommand(agyBin string, extraArgs []string) string {
 		`export TERM=xterm-256color; %s; %s; __rc=$?; if [[ $__rc -ne 0 && $__rc -ne 130 ]]; then echo ""; echo "[agy 异常退出 (code=$__rc)，可查看上方报错后输入 exit 关闭]"; exec /bin/zsh -l; fi`,
 		proxySetup, strings.Join(parts, " "),
 	)
+}
+
+func buildAgyEnvBanner(alias, email string, switched, activePresent bool) string {
+	accountDesc := strings.TrimSpace(alias)
+	em := strings.TrimSpace(email)
+	switch {
+	case accountDesc != "" && accountDesc != "default" && em != "":
+		accountDesc = fmt.Sprintf("%s (%s)", accountDesc, em)
+	case (accountDesc == "" || accountDesc == "default") && em != "":
+		accountDesc = em
+	case accountDesc == "":
+		accountDesc = "default"
+	}
+
+	if switched {
+		return fmt.Sprintf("[agy 账号环境已加载] %s（已切换全局 Keychain，输入 agy 即可启动）", accountDesc)
+	}
+	if activePresent {
+		return fmt.Sprintf("[agy 账号环境已加载] 当前登录: %s（未切换 Keychain，输入 agy 即可启动）", accountDesc)
+	}
+	return "[agy 环境已加载] 当前未检测到已登录凭据，可输入 agy 完成登录"
+}
+
+// buildAgyEnvShellCommand prepares the shell environment for a selected Antigravity account
+// (PATH, account markers, proxy variables, status banner) and drops into an interactive login zsh
+// WITHOUT directly launching `agy`.
+func buildAgyEnvShellCommand(agyBin, alias, email string, switched, activePresent bool) string {
+	stmts := []string{`export TERM=xterm-256color`}
+
+	if agyBin != "" {
+		if agyDir := strings.TrimSpace(filepath.Dir(agyBin)); agyDir != "" && agyDir != "." {
+			stmts = append(stmts, fmt.Sprintf(`case ":$PATH:" in *:%s:*) ;; *) export PATH=%s:"$PATH" ;; esac`, shellQuote(agyDir), shellQuote(agyDir)))
+		}
+	}
+	if alias := strings.TrimSpace(alias); alias != "" {
+		stmts = append(stmts, fmt.Sprintf("export AI_AUDIT_AGY_ACCOUNT=%s", shellQuote(alias)))
+	}
+	if email := strings.TrimSpace(email); email != "" {
+		stmts = append(stmts, fmt.Sprintf("export AI_AUDIT_AGY_EMAIL=%s", shellQuote(email)))
+	}
+
+	callerProxy := collectCallerProxyEnv(os.Getenv)
+	fbHTTP, fbHTTPS, fbAll := "", "", ""
+	if !hasActiveProxyEnv(callerProxy) {
+		fbHTTP, fbHTTPS, fbAll = detectFallbackProxy()
+	}
+	if proxySetup := buildInteractiveProxyShellExports(callerProxy, fbHTTP, fbHTTPS, fbAll); proxySetup != "" {
+		stmts = append(stmts, proxySetup)
+	}
+
+	banner := buildAgyEnvBanner(alias, email, switched, activePresent)
+	stmts = append(stmts, fmt.Sprintf("printf '%%s\\n' %s", shellQuote(banner)))
+	stmts = append(stmts, `exec /bin/zsh -l`)
+	return strings.Join(stmts, "; ")
 }
 
 func runAgyInPlace(agyBin, cwd string, extraArgs []string) error {
@@ -1124,7 +1191,7 @@ func openDirectTerminalWindow(agyBin, cwd string, extraArgs []string) error {
 	}
 	callerProxy := collectCallerProxyEnv(os.Getenv)
 	fbHTTP, fbHTTPS, fbAll := "", "", ""
-	if len(callerProxy) == 0 {
+	if !hasActiveProxyEnv(callerProxy) {
 		fbHTTP, fbHTTPS, fbAll = detectFallbackProxy()
 	}
 	proxySetup := buildProxyShellExports(callerProxy, fbHTTP, fbHTTPS, fbAll)

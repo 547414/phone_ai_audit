@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -401,6 +402,20 @@ func TestProxyPropagationAndScutilParsing(t *testing.T) {
 	if !strings.Contains(s2, `if [[ -z`) || !strings.Contains(s2, `HTTPS_PROXY='http://127.0.0.1:7890'`) || !strings.Contains(s2, `ALL_PROXY='socks5://127.0.0.1:7891'`) {
 		t.Fatalf("unexpected fallback proxy exports: %s", s2)
 	}
+
+	// NO_PROXY alone must NOT count as an active proxy so fallback detection still runs.
+	if hasActiveProxyEnv(map[string]string{"NO_PROXY": "localhost,127.0.0.1"}) {
+		t.Fatalf("NO_PROXY alone should not count as active proxy")
+	}
+	if !hasActiveProxyEnv(map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7890"}) {
+		t.Fatalf("HTTPS_PROXY should count as active proxy")
+	}
+
+	// Interactive proxy exports must NOT double-source ~/.zshrc before `exec /bin/zsh -l`.
+	s3 := buildInteractiveProxyShellExports(map[string]string{"NO_PROXY": "localhost"}, hp, hsp, ap)
+	if strings.Contains(s3, `.zshrc`) || !strings.Contains(s3, `export NO_PROXY='localhost'`) || !strings.Contains(s3, `HTTPS_PROXY='http://127.0.0.1:7890'`) {
+		t.Fatalf("unexpected interactive proxy exports: %s", s3)
+	}
 }
 
 func TestRemoteSnapshotAndPrepareLaunch(t *testing.T) {
@@ -490,12 +505,13 @@ func TestRemoteSnapshotAndPrepareLaunch(t *testing.T) {
 		t.Fatalf("secret leaked in remote snapshot: %s", string(rawJSON))
 	}
 
-	// 2. PrepareRemoteLaunch switches Keychain to "alice", resolves cwd, and builds agy shell command.
+	// 2. PrepareRemoteLaunch switches Keychain to "alice", resolves cwd, and loads account env into zsh
+	// WITHOUT directly launching `agy`.
 	plan, unlock, err := mgr.PrepareRemoteLaunch("alice", projectDir, "")
 	if err != nil {
 		t.Fatalf("PrepareRemoteLaunch alice: %v", err)
 	}
-	defer unlock()
+	unlock()
 
 	if plan.Profile == nil || plan.Profile.Name != "alice" || plan.AccountLabel != "alice" {
 		t.Fatalf("unexpected plan profile: %+v", plan)
@@ -503,12 +519,33 @@ func TestRemoteSnapshotAndPrepareLaunch(t *testing.T) {
 	if plan.Cwd != projectDir {
 		t.Fatalf("expected cwd %s, got %s", projectDir, plan.Cwd)
 	}
-	if !strings.Contains(plan.ShellCommand, "agy") {
-		t.Fatalf("expected agy in shell command: %s", plan.ShellCommand)
+	if !strings.Contains(plan.ShellCommand, "export AI_AUDIT_AGY_ACCOUNT='alice'") ||
+		!strings.Contains(plan.ShellCommand, "export AI_AUDIT_AGY_EMAIL='alice@example.com'") ||
+		!strings.HasSuffix(plan.ShellCommand, "exec /bin/zsh -l") {
+		t.Fatalf("expected env-only interactive zsh bootstrap command, got: %s", plan.ShellCommand)
+	}
+	if strings.Contains(plan.ShellCommand, shellQuote(fakeAgy)) || strings.Contains(plan.ShellCommand, "__rc=$?") {
+		t.Fatalf("remote launch must NOT directly execute agy binary: %s", plan.ShellCommand)
+	}
+	if out, err := exec.Command("/bin/zsh", "-n", "-c", plan.ShellCommand).CombinedOutput(); err != nil {
+		t.Fatalf("generated zsh command has syntax error: %v (%s)\ncmd=%s", err, string(out), plan.ShellCommand)
 	}
 	gotActive, err := kc.Get(DefaultAgyService, DefaultAgyAccount)
 	if err != nil || !bytes.Equal(gotActive, aliceSecret) {
 		t.Fatalf("expected Keychain switched to alice before launch, err=%v got=%s", err, string(gotActive))
+	}
+
+	// 2b. PrepareRemoteLaunch with empty account keeps current Keychain untouched and still enters zsh cleanly.
+	planDefault, unlockDefault, err := mgr.PrepareRemoteLaunch("", projectDir, "")
+	if err != nil {
+		t.Fatalf("PrepareRemoteLaunch default: %v", err)
+	}
+	unlockDefault()
+	if planDefault.AccountLabel != "alice" || !strings.Contains(planDefault.ShellCommand, "未切换 Keychain") || !strings.HasSuffix(planDefault.ShellCommand, "exec /bin/zsh -l") {
+		t.Fatalf("unexpected default remote plan: %+v", planDefault)
+	}
+	if out, err := exec.Command("/bin/zsh", "-n", "-c", planDefault.ShellCommand).CombinedOutput(); err != nil {
+		t.Fatalf("generated default zsh command has syntax error: %v (%s)", err, string(out))
 	}
 
 	// 3. Invalid cwd should fail cleanly before switching Keychain.
